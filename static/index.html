@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f6fa" />
+    <meta name="description" content="Local-first ranked shorts editor for TikTok and YouTube videos." />
+    <title>RankCut Studio</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="RankCut Studio home">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32"><path d="M4 7.5 16 2l12 5.5v17L16 30 4 24.5v-17Z"/><path d="m10 11 6-3 6 3-6 3-6-3Zm0 6 6-3 6 3-6 3-6-3Z"/></svg>
+          </span>
+          <span>RankCut</span>
+          <span class="brand-suffix">studio</span>
+        </a>
+
+        <div class="project-identity">
+          <span class="eyebrow">Current project</span>
+          <input id="project-name" class="project-name" value="My ranked short" aria-label="Project name" maxlength="80" />
+        </div>
+
+        <div class="topbar-status" aria-live="polite">
+          <span id="save-status" class="save-status"><i></i> Saved locally</span>
+          <span id="tool-status" class="tool-status" title="Media engine status">Checking engine…</span>
+        </div>
+
+        <div class="topbar-actions">
+          <button id="help-button" class="icon-button" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.6 2.1c-.8.5-1.4 1-1.4 2.1M12 17h.01"/></svg>
+          </button>
+          <label class="button secondary file-button">
+            <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v5h14v-5"/></svg>
+            Upload
+            <input id="file-input" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mkv" multiple />
+          </label>
+          <button id="export-button" class="button primary" type="button">
+            Export video
+            <svg viewBox="0 0 24 24"><path d="M5 12h13m0 0-5-5m5 5-5 5"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="rank-rail" aria-label="Video ranking">
+          <div class="panel-heading rank-heading">
+            <div>
+              <span class="eyebrow">Sequence</span>
+              <h1>Rank stack <span id="clip-count">0</span></h1>
+            </div>
+            <button id="shuffle-button" class="icon-button warm" type="button" title="Shuffle ranking" aria-label="Shuffle ranking">
+              <svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
+            </button>
+          </div>
+
+          <div class="import-box">
+            <label for="url-input">Paste TikTok or YouTube links</label>
+            <textarea id="url-input" rows="3" placeholder="Paste Share links or copied share text…"></textarea>
+            <div class="import-box-footer">
+              <span><b>YT</b> + <b>TT</b> supported</span>
+              <button id="import-button" class="button compact" type="button">
+                <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.1 1.1M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.1-1.1"/></svg>
+                Import
+              </button>
+            </div>
+            <div id="import-progress" class="inline-progress" hidden>
+              <div class="progress-track"><i></i></div>
+              <span>Fetching video…</span>
+            </div>
+          </div>
+
+          <div id="clip-list" class="clip-list" aria-label="Ranked clips"></div>
+
+          <div id="rank-empty" class="rail-empty">
+            <span class="empty-stack" aria-hidden="true"><i></i><i></i><i></i></span>
+            <strong>Your ranking starts here</strong>
+            <p>Paste links above or upload videos from your computer.</p>
+          </div>
+        </aside>
+
+        <main class="stage-column">
+          <div class="stage-toolbar">
+            <div class="viewport-switcher" role="group" aria-label="Preview size">
+              <button class="active" type="button">9:16 <span>Shorts</span></button>
+              <span>1080 × 1920</span>
+            </div>
+            <div class="stage-actions">
+              <button id="undo-button" class="icon-button" type="button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+                <svg viewBox="0 0 24 24"><path d="M9 7 4 12l5 5M5 12h8a6 6 0 0 1 6 6"/></svg>
+              </button>
+              <button id="redo-button" class="icon-button" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>
+                <svg viewBox="0 0 24 24"><path d="m15 7 5 5-5 5m4-5h-8a6 6 0 0 0-6 6"/></svg>
+              </button>
+              <span class="divider"></span>
+              <button id="fit-button" class="small-select" type="button" title="Toggle cover / contain">Fill frame</button>
+            </div>
+          </div>
+
+          <div class="stage-wrap">
+            <div id="preview-empty" class="preview-empty">
+              <div class="preview-poster">
+                <span class="poster-rank">01</span>
+                <div class="poster-copy"><span>BUILD YOUR</span><b>RANKING</b></div>
+                <div class="poster-bars"><i></i><i></i><i></i><i></i></div>
+              </div>
+              <div>
+                <span class="eyebrow">Ready when you are</span>
+                <h2>Drop in the clips worth ranking.</h2>
+                <p>Your title and per-video list text stay editable all the way to export.</p>
+              </div>
+            </div>
+
+            <div id="phone-stage" class="phone-stage" hidden>
+              <video id="preview-video" playsinline preload="metadata"></video>
+              <div class="safe-area top" aria-hidden="true"></div>
+              <div class="safe-area bottom" aria-hidden="true"></div>
+              <div id="title-overlay" class="video-title-overlay"></div>
+              <div id="countdown-overlay" class="countdown-overlay" aria-label="Persistent ranking countdown"></div>
+              <div class="platform-ghost" aria-hidden="true"><i></i><i></i><i></i></div>
+            </div>
+          </div>
+
+          <div class="transport" id="transport" hidden>
+            <button id="skip-back" class="icon-button" type="button" aria-label="Previous video">
+              <svg viewBox="0 0 24 24"><path d="M6 5v14M18 6l-8 6 8 6V6Z"/></svg>
+            </button>
+            <button id="play-button" class="play-button" type="button" aria-label="Play">
+              <svg class="play-icon" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></svg>
+              <svg class="pause-icon" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>
+            </button>
+            <button id="skip-forward" class="icon-button" type="button" aria-label="Next video">
+              <svg viewBox="0 0 24 24"><path d="M18 5v14M6 6l8 6-8 6V6Z"/></svg>
+            </button>
+            <span id="current-time" class="timecode">00:00.0</span>
+            <input id="scrubber" class="scrubber" type="range" min="0" max="100" value="0" step="0.1" aria-label="Playback position" />
+            <span id="duration-time" class="timecode muted">00:00.0</span>
+            <button id="mute-preview" class="icon-button" type="button" aria-label="Mute preview">
+              <svg class="volume-icon" viewBox="0 0 24 24"><path d="M11 5 6.5 9H3v6h3.5l4.5 4V5Zm4 4a4 4 0 0 1 0 6m2.5-8.5a8 8 0 0 1 0 11"/></svg>
+              <svg class="muted-icon" viewBox="0 0 24 24"><path d="M11 5 6.5 9H3v6h3.5l4.5 4V5Zm5 5 5 5m0-5-5 5"/></svg>
+            </button>
+          </div>
+
+          <section class="timeline" aria-label="Project timeline">
+            <div class="timeline-heading">
+              <div><span class="eyebrow">Final cut</span><strong id="timeline-duration">00:00</strong></div>
+              <span>Ranking order becomes export order</span>
+            </div>
+            <div id="timeline-track" class="timeline-track"></div>
+          </section>
+        </main>
+
+        <aside class="inspector" aria-label="Edit controls">
+          <div class="inspector-tabs" role="tablist">
+            <button class="active" data-tab="text" role="tab" type="button">Text</button>
+            <button data-tab="clip" role="tab" type="button">Clip</button>
+            <button data-tab="export" role="tab" type="button">Output</button>
+          </div>
+
+          <div class="inspector-scroll">
+            <section class="inspector-panel active" data-panel="text">
+              <div class="section-heading">
+                <div><span class="eyebrow">Always on screen</span><h2>Video title</h2></div>
+                <label class="switch"><input id="title-enabled" type="checkbox" checked /><span></span></label>
+              </div>
+              <div id="title-editor" class="rich-editor">
+                <label for="title-input">Title copy</label>
+                <textarea id="title-input" rows="3" maxlength="160">THE MOST SATISFYING CLIPS RANKED</textarea>
+                <div class="emoji-strip" data-emoji-target="title" aria-label="Add emoji to title">
+                  <span>Add emoji</span><button type="button">😂</button><button type="button">🔥</button><button type="button">🤯</button><button type="button">👀</button><button type="button">🏆</button>
+                </div>
+                <div class="word-tools">
+                  <span>Click words to select</span>
+                  <button class="text-button" data-action="select-all-title" type="button">Select all</button>
+                </div>
+                <div id="title-tokens" class="token-field" aria-label="Title words"></div>
+                <div class="color-row">
+                  <span>Word color</span>
+                  <div id="title-palette" class="palette" role="group" aria-label="Title word color"></div>
+                  <label class="custom-color" title="Custom color"><input id="title-custom-color" type="color" value="#ffffff" /><span></span></label>
+                </div>
+              </div>
+              <div class="control-grid">
+                <label>Size <output id="title-size-value">78</output><input id="title-size" type="range" min="28" max="140" value="78" /></label>
+                <label>Vertical position <output id="title-y-value">9%</output><input id="title-y" type="range" min="2" max="58" value="9" /></label>
+                <label>Backdrop <output id="title-background-value">66%</output><input id="title-background" type="range" min="0" max="100" value="66" /></label>
+              </div>
+              <div class="segmented" role="group" aria-label="Title alignment">
+                <button data-align="left" type="button"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 11h10M4 16h16M4 21h12"/></svg></button>
+                <button data-align="center" class="active" type="button"><svg viewBox="0 0 24 24"><path d="M4 6h16M7 11h10M4 16h16M6 21h12"/></svg></button>
+                <button data-align="right" type="button"><svg viewBox="0 0 24 24"><path d="M4 6h16M10 11h10M4 16h16M8 21h12"/></svg></button>
+              </div>
+              <div class="effect-picker" data-effect-target="title">
+                <span>Text effect</span>
+                <div><button type="button" data-effect="outline">Outline</button><button type="button" data-effect="shadow">Shadow</button><button type="button" data-effect="glow">Glow</button><button type="button" data-effect="none">Clean</button></div>
+              </div>
+
+              <div class="section-rule"></div>
+
+              <div class="section-heading compact-heading">
+                <div><span class="eyebrow">Changes per video</span><h2>List text</h2></div>
+                <span id="editing-rank" class="editing-rank">No clip</span>
+              </div>
+              <div id="no-clip-editor" class="editor-empty">Select a video in the rank stack to edit its list text.</div>
+              <div id="list-editor" class="rich-editor" hidden>
+                <label for="list-input">Entry copy</label>
+                <textarea id="list-input" rows="3" maxlength="180" placeholder="Why this clip earned its rank"></textarea>
+                <div class="emoji-strip" data-emoji-target="list" aria-label="Add emoji to list text">
+                  <span>Add emoji</span><button type="button">😂</button><button type="button">🔥</button><button type="button">😱</button><button type="button">✅</button><button type="button">💀</button>
+                </div>
+                <div class="word-tools">
+                  <span>Style individual words</span>
+                  <button class="text-button" data-action="select-all-list" type="button">Select all</button>
+                </div>
+                <div id="list-tokens" class="token-field" aria-label="List text words"></div>
+                <div class="color-row">
+                  <span>Word color</span>
+                  <div id="list-palette" class="palette" role="group" aria-label="List word color"></div>
+                  <label class="custom-color" title="Custom color"><input id="list-custom-color" type="color" value="#ffffff" /><span></span></label>
+                </div>
+                <div class="control-grid list-controls">
+                  <label>Size <output id="list-size-value">60</output><input id="list-size" type="range" min="24" max="110" value="60" /></label>
+                  <label>Vertical position <output id="list-y-value">73%</output><input id="list-y" type="range" min="25" max="88" value="73" /></label>
+                  <label>Backdrop <output id="list-background-value">72%</output><input id="list-background" type="range" min="0" max="100" value="72" /></label>
+                </div>
+                <div class="badge-color-row"><span>Rank badge</span><input id="badge-color" type="color" value="#ff795c" /></div>
+                <div class="effect-picker" data-effect-target="list">
+                  <span>Text effect</span>
+                  <div><button type="button" data-effect="outline">Outline</button><button type="button" data-effect="shadow">Shadow</button><button type="button" data-effect="glow">Glow</button><button type="button" data-effect="none">Clean</button></div>
+                </div>
+                <p class="countdown-note">Every number stays visible. This label appears only while its video plays.</p>
+              </div>
+            </section>
+
+            <section class="inspector-panel" data-panel="clip">
+              <div class="section-heading"><div><span class="eyebrow">Selected media</span><h2>Clip settings</h2></div></div>
+              <div id="clip-panel-empty" class="editor-empty">Select a video to adjust its trim, crop, and sound.</div>
+              <div id="clip-controls" hidden>
+                <label class="field-label" for="clip-name">Display name</label>
+                <input id="clip-name" class="text-input" maxlength="120" />
+                <div class="metric-card">
+                  <span>Source</span><strong id="clip-source">—</strong>
+                  <span>Original frame</span><strong id="clip-dimensions">—</strong>
+                  <span>Duration</span><strong id="clip-original-duration">—</strong>
+                </div>
+                <div class="section-rule"></div>
+                <h3>Trim</h3>
+                <div class="two-fields">
+                  <label>Start <input id="trim-start" type="number" min="0" step="0.1" /></label>
+                  <label>End <input id="trim-end" type="number" min="0.1" step="0.1" /></label>
+                </div>
+                <div id="trim-bar" class="trim-bar"><i></i><b></b></div>
+                <div class="section-rule"></div>
+                <h3>Framing</h3>
+                <div class="choice-cards">
+                  <button type="button" data-fit="cover" class="active"><i class="cover-icon"></i><span><b>Fill frame</b><small>Crop edges</small></span></button>
+                  <button type="button" data-fit="contain"><i class="contain-icon"></i><span><b>Fit inside</b><small>Keep full video</small></span></button>
+                </div>
+                <div class="section-rule"></div>
+                <div class="section-heading compact-heading"><h3>Sound</h3><label class="switch"><input id="clip-muted" type="checkbox" /><span></span><em>Mute</em></label></div>
+                <label class="range-label">Volume <output id="volume-value">100%</output><input id="clip-volume" type="range" min="0" max="200" value="100" /></label>
+                <button id="delete-clip" class="danger-button" type="button"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg>Remove video</button>
+              </div>
+            </section>
+
+            <section class="inspector-panel" data-panel="export">
+              <div class="section-heading"><div><span class="eyebrow">Platform ready</span><h2>Output settings</h2></div></div>
+              <div class="output-card selected">
+                <span class="output-icon">9:16</span>
+                <div><strong>Vertical short</strong><small>TikTok · Reels · Shorts</small></div>
+                <svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg>
+              </div>
+              <div class="metric-card export-metrics">
+                <span>Resolution</span><strong>1080 × 1920</strong>
+                <span>Frame rate</span><strong>30 FPS</strong>
+                <span>Format</span><strong>MP4 · H.264</strong>
+                <span>Audio</span><strong>AAC · 192 kbps</strong>
+              </div>
+              <label class="field-label" for="quality-select">Render quality</label>
+              <select id="quality-select" class="text-input">
+                <option value="18">High quality (larger file)</option>
+                <option value="20" selected>Balanced</option>
+                <option value="23">Smaller file</option>
+              </select>
+              <label class="field-label" for="speed-select">Render speed</label>
+              <select id="speed-select" class="text-input">
+                <option value="fast">Fast</option>
+                <option value="medium" selected>Balanced</option>
+                <option value="slow">Best compression</option>
+              </select>
+              <button id="export-side-button" class="button primary wide" type="button">Export ranked video<svg viewBox="0 0 24 24"><path d="M5 12h13m0 0-5-5m5 5-5 5"/></svg></button>
+              <div class="section-rule"></div>
+              <div class="section-heading compact-heading"><h3>Recent exports</h3><button id="refresh-exports" class="text-button" type="button">Refresh</button></div>
+              <div id="recent-exports" class="recent-exports"><span class="muted-copy">No exports yet.</span></div>
+            </section>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+
+    <dialog id="export-dialog" class="modal">
+      <form method="dialog">
+        <button class="modal-close icon-button" value="cancel" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        <div id="export-confirm">
+          <span class="modal-kicker">Final check</span>
+          <h2>Turn this stack into one short.</h2>
+          <p id="export-summary">Your videos will be rendered in ranking order with all text styling burned into the MP4.</p>
+          <div class="export-preview-strip" id="export-preview-strip"></div>
+          <div class="export-specs"><span>1080 × 1920</span><i></i><span>30 FPS</span><i></i><span>MP4</span></div>
+          <div class="modal-actions">
+            <button class="button secondary" value="cancel">Keep editing</button>
+            <button id="start-render" class="button primary" type="button">Start export<svg viewBox="0 0 24 24"><path d="M5 12h13m0 0-5-5m5 5-5 5"/></svg></button>
+          </div>
+        </div>
+        <div id="export-running" class="render-state" hidden>
+          <div class="render-orbit"><i></i><b id="render-percent">0%</b></div>
+          <span class="modal-kicker">Local render</span>
+          <h2 id="render-title">Building your video…</h2>
+          <p id="render-message">Preparing media</p>
+          <div class="progress-track large"><i id="render-progress"></i></div>
+          <small>You can leave this window open while RankCut renders.</small>
+        </div>
+        <div id="export-complete" class="render-state success" hidden>
+          <div class="success-mark"><svg viewBox="0 0 32 32"><path d="m8 16 5 5L24 10"/></svg></div>
+          <span class="modal-kicker">Export complete</span>
+          <h2>Your ranked short is ready.</h2>
+          <p>All titles, word colors, ranks, and list text are included in the final MP4.</p>
+          <video id="export-result-video" controls playsinline></video>
+          <div class="modal-actions">
+            <button id="close-export" class="button secondary" type="button">Done</button>
+            <a id="download-export" class="button primary" download>Download MP4<svg viewBox="0 0 24 24"><path d="M12 4v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg></a>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="help-dialog" class="modal help-modal">
+      <form method="dialog">
+        <button class="modal-close icon-button" value="cancel" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        <span class="modal-kicker">Move faster</span>
+        <h2>Keyboard shortcuts</h2>
+        <div class="shortcut-list">
+          <span>Play / pause</span><kbd>Space</kbd>
+          <span>Previous clip</span><kbd>↑</kbd>
+          <span>Next clip</span><kbd>↓</kbd>
+          <span>Undo</span><kbd>Ctrl Z</kbd>
+          <span>Redo</span><kbd>Ctrl Shift Z</kbd>
+          <span>Save now</span><kbd>Ctrl S</kbd>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
