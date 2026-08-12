@@ -1,0 +1,9 @@
+data/uploads/*
+data/exports/*
+data/jobs/*
+data/project.json
+tools/*.exe
+!data/uploads/.gitkeep
+!data/exports/.gitkeep
+!data/jobs/.gitkeep
+
