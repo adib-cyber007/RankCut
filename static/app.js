@@ -23,7 +23,7 @@
     titleSize: $('#title-size'), titleSizeValue: $('#title-size-value'), titleY: $('#title-y'), titleYValue: $('#title-y-value'), titleBackground: $('#title-background'), titleBackgroundValue: $('#title-background-value'),
     listEditor: $('#list-editor'), noClipEditor: $('#no-clip-editor'), editingRank: $('#editing-rank'), listInput: $('#list-input'), listTokens: $('#list-tokens'), listPalette: $('#list-palette'), listCustomColor: $('#list-custom-color'),
     listSize: $('#list-size'), listSizeValue: $('#list-size-value'), listY: $('#list-y'), listYValue: $('#list-y-value'), listBackground: $('#list-background'), listBackgroundValue: $('#list-background-value'), badgeColor: $('#badge-color'),
-    clipPanelEmpty: $('#clip-panel-empty'), clipControls: $('#clip-controls'), clipName: $('#clip-name'), clipSource: $('#clip-source'), clipDimensions: $('#clip-dimensions'), clipOriginalDuration: $('#clip-original-duration'),
+    clipPanelEmpty: $('#clip-panel-empty'), clipControls: $('#clip-controls'), clipName: $('#clip-name'), clipRank: $('#clip-rank'), clipSource: $('#clip-source'), clipDimensions: $('#clip-dimensions'), clipOriginalDuration: $('#clip-original-duration'),
     trimStart: $('#trim-start'), trimEnd: $('#trim-end'), clipMuted: $('#clip-muted'), clipVolume: $('#clip-volume'), volumeValue: $('#volume-value'), deleteClip: $('#delete-clip'),
     undoButton: $('#undo-button'), redoButton: $('#redo-button'), qualitySelect: $('#quality-select'), speedSelect: $('#speed-select'), recentExports: $('#recent-exports'), refreshExports: $('#refresh-exports'),
     exportDialog: $('#export-dialog'), exportConfirm: $('#export-confirm'), exportRunning: $('#export-running'), exportComplete: $('#export-complete'), exportSummary: $('#export-summary'), exportPreviewStrip: $('#export-preview-strip'),
@@ -32,7 +32,7 @@
   };
 
   const defaultProject = () => ({
-    version: 3,
+    version: 4,
     name: 'My ranked short',
     selectedId: null,
     title: {
@@ -47,6 +47,7 @@
     },
     ranking: { size: 60, y: 73 },
     clips: [],
+    entranceOrder: [],
     export: { crf: 20, preset: 'medium' },
     updatedAt: new Date().toISOString(),
   });
@@ -92,8 +93,18 @@
     return project.clips.find((clip) => clip.id === project.selectedId) || null;
   }
 
-  function selectedIndex() {
-    return project.clips.findIndex((clip) => clip.id === project.selectedId);
+  function entranceSequence() {
+    return RankingLayout.buildEntranceSequence(project.clips, project.entranceOrder);
+  }
+
+  function selectedEntranceIndex() {
+    return entranceSequence().findIndex((clip) => clip.id === project.selectedId);
+  }
+
+  function revealedClipIds() {
+    const sequence = entranceSequence();
+    const index = sequence.findIndex((clip) => clip.id === project.selectedId);
+    return index < 0 ? [] : sequence.slice(0, index + 1).map((clip) => clip.id);
   }
 
   function normalizedTokens(text, previous = [], defaultColor = '#FFFFFF') {
@@ -109,6 +120,7 @@
     const listText = clip.list?.text || 'WORTH THE WATCH';
     return {
       ...clip,
+      rank: Number.isInteger(Number(clip.rank)) ? Number(clip.rank) : null,
       trimStart: clamp(clip.trimStart ?? 0, 0, duration - .1),
       trimEnd: clamp(clip.trimEnd ?? duration, .1, duration),
       volume: clamp(clip.volume ?? 1, 0, 2),
@@ -133,15 +145,57 @@
     if (!['outline', 'shadow', 'glow', 'none'].includes(next.title.effect)) next.title.effect = 'outline';
     next.title.tokens = Array.isArray(next.title.tokens) ? next.title.tokens : normalizedTokens(next.title.text, [], '#FFFFFF');
     next.clips = Array.isArray(next.clips) ? next.clips.map(ensureClipShape) : [];
+    const usedRanks = new Set();
+    next.clips.forEach((clip, index) => {
+      const requested = Number(clip.rank);
+      const valid = Number.isInteger(requested) && requested >= 1 && requested <= next.clips.length && !usedRanks.has(requested);
+      if (valid) {
+        clip.rank = requested;
+        usedRanks.add(requested);
+        return;
+      }
+      const available = Array.from({ length: next.clips.length }, (_, rankIndex) => rankIndex + 1)
+        .find((rank) => !usedRanks.has(rank));
+      clip.rank = available || index + 1;
+      usedRanks.add(clip.rank);
+    });
+    const clipIds = new Set(next.clips.map((clip) => clip.id));
+    const requestedEntranceOrder = Array.isArray(next.entranceOrder) ? next.entranceOrder : [];
+    const uniqueEntranceOrder = requestedEntranceOrder.filter((id, index, all) => clipIds.has(id) && all.indexOf(id) === index);
+    const missingEntranceIds = next.clips
+      .filter((clip) => !uniqueEntranceOrder.includes(clip.id))
+      .sort((left, right) => right.rank - left.rank)
+      .map((clip) => clip.id);
+    next.entranceOrder = [...uniqueEntranceOrder, ...missingEntranceIds];
     const rankingSource = next.ranking || next.clips[0]?.list || base.ranking;
     next.ranking = {
       size: clamp(rankingSource.size ?? base.ranking.size, 24, 110),
       y: clamp(rankingSource.y ?? base.ranking.y, 15, 92),
     };
     next.export = { ...base.export, ...(next.export || {}) };
-    next.version = 3;
+    next.version = 4;
     if (!next.clips.some((clip) => clip.id === next.selectedId)) next.selectedId = next.clips[0]?.id || null;
     return next;
+  }
+
+  function addClipToProject(clip) {
+    const shaped = ensureClipShape(clip);
+    shaped.rank = project.clips.length + 1;
+    project.clips.push(shaped);
+    project.entranceOrder = [shaped.id, ...(project.entranceOrder || []).filter((id) => id !== shaped.id)];
+    project.selectedId = shaped.id;
+    return shaped;
+  }
+
+  function assignClipRank(draft, clipId, requestedRank) {
+    const clip = draft.clips.find((item) => item.id === clipId);
+    if (!clip) return;
+    const nextRank = Math.round(clamp(requestedRank, 1, draft.clips.length));
+    if (nextRank === clip.rank) return;
+    const previousRank = clip.rank;
+    const displaced = draft.clips.find((item) => item.id !== clipId && item.rank === nextRank);
+    clip.rank = nextRank;
+    if (displaced) displaced.rank = previousRank;
   }
 
   function snapshot() {
@@ -237,7 +291,7 @@
   }
 
   function exportSequence() {
-    return [...project.clips].reverse();
+    return entranceSequence();
   }
 
   function renderPalette(container, target) {
@@ -257,12 +311,12 @@
   function renderClipList() {
     elements.clipCount.textContent = project.clips.length;
     elements.rankEmpty.hidden = project.clips.length > 0;
-    elements.clipList.innerHTML = project.clips.map((clip, index) => `
-      <article class="clip-card ${clip.id === project.selectedId ? 'selected' : ''}" data-clip-id="${escapeHtml(clip.id)}" draggable="true" tabindex="0" aria-label="Rank ${index + 1}: ${escapeHtml(clip.name)}">
-        <span class="drag-handle" title="Drag to reorder"><svg viewBox="0 0 16 20"><circle cx="5" cy="4" r="1"/><circle cx="11" cy="4" r="1"/><circle cx="5" cy="10" r="1"/><circle cx="11" cy="10" r="1"/><circle cx="5" cy="16" r="1"/><circle cx="11" cy="16" r="1"/></svg></span>
-        <span class="clip-thumb">${clip.poster ? `<img src="${escapeHtml(clip.poster)}" alt="" />` : ''}<b class="clip-rank">${String(index + 1).padStart(2, '0')}</b></span>
-        <span class="clip-info"><strong>${escapeHtml(clip.name || `Video ${index + 1}`)}</strong><span class="clip-meta"><i class="source-pill">${escapeHtml(clip.source || 'Video')}</i>${formatTime(clipDuration(clip), true)}</span></span>
-        <button class="card-menu" type="button" data-move-down="${escapeHtml(clip.id)}" title="Move down one rank" aria-label="Move ${escapeHtml(clip.name)} down one rank"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+    elements.clipList.innerHTML = entranceSequence().map((clip, index) => `
+      <article class="clip-card ${clip.id === project.selectedId ? 'selected' : ''}" data-clip-id="${escapeHtml(clip.id)}" draggable="true" tabindex="0" aria-label="Entrance ${index + 1}, rank ${clip.rank}: ${escapeHtml(clip.name)}">
+        <span class="drag-handle" title="Drag to change entrance order"><svg viewBox="0 0 16 20"><circle cx="5" cy="4" r="1"/><circle cx="11" cy="4" r="1"/><circle cx="5" cy="10" r="1"/><circle cx="11" cy="10" r="1"/><circle cx="5" cy="16" r="1"/><circle cx="11" cy="16" r="1"/></svg></span>
+        <span class="clip-thumb">${clip.poster ? `<img src="${escapeHtml(clip.poster)}" alt="" />` : ''}<b class="clip-rank">R${String(clip.rank).padStart(2, '0')}</b></span>
+        <span class="clip-info"><strong>${escapeHtml(clip.name || `Video ${index + 1}`)}</strong><span class="clip-meta"><i class="source-pill">IN ${String(index + 1).padStart(2, '0')}</i><span>${escapeHtml(clip.source || 'Video')}</span><span>${formatTime(clipDuration(clip), true)}</span></span></span>
+        <button class="card-menu" type="button" data-move-later="${escapeHtml(clip.id)}" title="Move one entrance later" aria-label="Move ${escapeHtml(clip.name)} one entrance later"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
       </article>
     `).join('');
   }
@@ -270,10 +324,10 @@
   function renderTimeline() {
     const total = project.clips.reduce((sum, clip) => sum + clipDuration(clip), 0);
     elements.timelineDuration.textContent = formatTime(total);
-    const sequence = project.clips.map((clip, index) => ({ clip, rank: index + 1 })).reverse();
-    elements.timelineTrack.innerHTML = sequence.map(({ clip, rank }) => `
+    const sequence = entranceSequence();
+    elements.timelineTrack.innerHTML = sequence.map((clip) => `
       <button type="button" class="timeline-clip ${clip.id === project.selectedId ? 'selected' : ''}" data-timeline-id="${escapeHtml(clip.id)}" style="--duration:${Math.max(1, clipDuration(clip))}">
-        ${clip.poster ? `<img src="${escapeHtml(clip.poster)}" alt="" />` : ''}<span>${String(rank).padStart(2, '0')}</span><i>${formatTime(clipDuration(clip), true)}</i>
+        ${clip.poster ? `<img src="${escapeHtml(clip.poster)}" alt="" />` : ''}<span>R${String(clip.rank).padStart(2, '0')}</span><i>${formatTime(clipDuration(clip), true)}</i>
       </button>
     `).join('');
   }
@@ -320,10 +374,9 @@
     elements.titleOverlay.classList.remove('effect-outline', 'effect-shadow', 'effect-glow', 'effect-none');
     elements.titleOverlay.classList.add(`effect-${project.title.effect || 'outline'}`);
 
-    const rank = selectedIndex() + 1;
-    const ranking = RankingLayout.buildRankingLayout(project.clips, rank - 1, project.ranking);
+    const ranking = RankingLayout.buildRankingLayout(project.clips, revealedClipIds(), project.ranking);
     elements.countdownOverlay.innerHTML = ranking.entries.map((entry) => {
-      const item = project.clips[entry.index];
+      const item = project.clips[entry.sourceIndex];
       const opacity = item.list.background / 100;
       const lines = entry.revealed ? entry.lines.map((line) => coloredLineMarkup(line, entry.wordGap * scale, 'ranking-line')).join('') : '';
       return `<div class="countdown-row ${entry.revealed ? 'revealed' : ''}" style="top:${entry.rowTop * scale}px;height:${entry.rowHeight * scale}px;--rank-color:${escapeHtml(item.list.badgeColor)}">
@@ -351,7 +404,7 @@
     const clip = selectedClip();
     elements.noClipEditor.hidden = Boolean(clip);
     elements.listEditor.hidden = !clip;
-    elements.editingRank.textContent = clip ? `Rank ${String(selectedIndex() + 1).padStart(2, '0')}` : 'No clip';
+    elements.editingRank.textContent = clip ? `Rank ${String(clip.rank).padStart(2, '0')}` : 'No clip';
     if (!clip) return;
     elements.listInput.value = clip.list.text;
     renderTokenField(elements.listTokens, clip.list.tokens, listSelection, 'list');
@@ -371,6 +424,10 @@
     elements.clipControls.hidden = !clip;
     if (!clip) return;
     elements.clipName.value = clip.name;
+    elements.clipRank.innerHTML = project.clips
+      .map((_, index) => `<option value="${index + 1}">Rank ${String(index + 1).padStart(2, '0')}</option>`)
+      .join('');
+    elements.clipRank.value = String(clip.rank);
     elements.clipSource.textContent = clip.source || 'Video';
     elements.clipDimensions.textContent = clip.width && clip.height ? `${clip.width} × ${clip.height}` : 'Unknown';
     elements.clipOriginalDuration.textContent = formatTime(clip.duration, true);
@@ -481,9 +538,7 @@
       span.textContent = `Downloading ${platform} video ${index + 1} of ${urls.length}…`;
       try {
         const data = await api('/api/import', { method: 'POST', body: { url: urls[index] } });
-        const clip = ensureClipShape(data.clip);
-        project.clips.push(clip);
-        project.selectedId = clip.id;
+        addClipToProject(data.clip);
         imported += 1;
         scheduleSave();
         renderAll();
@@ -496,7 +551,7 @@
     elements.importProgress.hidden = true;
     if (imported) {
       elements.urlInput.value = '';
-      toast(`${imported} video${imported === 1 ? '' : 's'} added to the rank stack.`);
+      toast(`${imported} video${imported === 1 ? '' : 's'} added to the entrance sequence.`);
     }
   }
 
@@ -514,9 +569,7 @@
         const data = await api(`/api/upload?filename=${encodeURIComponent(file.name)}`, {
           method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file,
         });
-        const clip = ensureClipShape(data.clip);
-        project.clips.push(clip);
-        project.selectedId = clip.id;
+        addClipToProject(data.clip);
         imported += 1;
         scheduleSave();
         renderAll();
@@ -531,41 +584,41 @@
     if (imported) toast(`${imported} local video${imported === 1 ? '' : 's'} added.`);
   }
 
-  function shuffleRanking() {
+  function shuffleEntrances() {
     if (project.clips.length < 2) {
       toast('Add at least two videos to shuffle.', 'warning');
       return;
     }
     mutate((draft) => {
-      const before = draft.clips.map((clip) => clip.id).join('|');
-      for (let i = draft.clips.length - 1; i > 0; i -= 1) {
+      const before = draft.entranceOrder.join('|');
+      for (let i = draft.entranceOrder.length - 1; i > 0; i -= 1) {
         const j = Math.floor(Math.random() * (i + 1));
-        [draft.clips[i], draft.clips[j]] = [draft.clips[j], draft.clips[i]];
+        [draft.entranceOrder[i], draft.entranceOrder[j]] = [draft.entranceOrder[j], draft.entranceOrder[i]];
       }
-      if (draft.clips.map((clip) => clip.id).join('|') === before) {
-        draft.clips.push(draft.clips.shift());
+      if (draft.entranceOrder.join('|') === before) {
+        draft.entranceOrder.push(draft.entranceOrder.shift());
       }
     });
-    toast('Ranking shuffled. Undo is available.');
+    toast('Entrances shuffled. Every video kept its assigned rank.');
   }
 
   function moveClip(id, targetId) {
     if (!id || !targetId || id === targetId) return;
     mutate((draft) => {
-      const from = draft.clips.findIndex((clip) => clip.id === id);
-      const to = draft.clips.findIndex((clip) => clip.id === targetId);
+      const from = draft.entranceOrder.indexOf(id);
+      const to = draft.entranceOrder.indexOf(targetId);
       if (from < 0 || to < 0) return;
-      const [item] = draft.clips.splice(from, 1);
-      draft.clips.splice(to, 0, item);
+      const [item] = draft.entranceOrder.splice(from, 1);
+      draft.entranceOrder.splice(to, 0, item);
     });
   }
 
-  function moveDown(id) {
-    const index = project.clips.findIndex((clip) => clip.id === id);
+  function moveLater(id) {
+    const index = project.entranceOrder.indexOf(id);
     if (index < 0 || project.clips.length < 2) return;
     mutate((draft) => {
-      const next = (index + 1) % draft.clips.length;
-      [draft.clips[index], draft.clips[next]] = [draft.clips[next], draft.clips[index]];
+      const next = (index + 1) % draft.entranceOrder.length;
+      [draft.entranceOrder[index], draft.entranceOrder[next]] = [draft.entranceOrder[next], draft.entranceOrder[index]];
     });
   }
 
@@ -583,9 +636,9 @@
     elements.exportRunning.hidden = true;
     elements.exportComplete.hidden = true;
     const duration = project.clips.reduce((sum, clip) => sum + clipDuration(clip), 0);
-    elements.exportSummary.textContent = `${project.clips.length} video${project.clips.length === 1 ? '' : 's'} · ${formatTime(duration, true)} total. The countdown plays from rank ${project.clips.length} to #1, retaining every revealed title.`;
-    elements.exportPreviewStrip.innerHTML = project.clips.map((clip, index) => ({ clip, rank: index + 1 })).reverse().slice(0, 7).map(({ clip, rank }, index) => `
-      <span class="export-preview-card" style="--offset:${Math.abs(index - Math.min(3, project.clips.length / 2)) * 3}px;--rotate:${(index - 3) * 2}deg">${clip.poster ? `<img src="${escapeHtml(clip.poster)}" alt="" />` : ''}<span>${String(rank).padStart(2, '0')}</span></span>
+    elements.exportSummary.textContent = `${project.clips.length} video${project.clips.length === 1 ? '' : 's'} · ${formatTime(duration, true)} total. Videos enter in the sequence shown on the left; each keeps its assigned rank.`;
+    elements.exportPreviewStrip.innerHTML = entranceSequence().slice(0, 7).map((clip, index) => `
+      <span class="export-preview-card" style="--offset:${Math.abs(index - Math.min(3, project.clips.length / 2)) * 3}px;--rotate:${(index - 3) * 2}deg">${clip.poster ? `<img src="${escapeHtml(clip.poster)}" alt="" />` : ''}<span>R${String(clip.rank).padStart(2, '0')}</span></span>
     `).join('');
     elements.exportDialog.showModal();
   }
@@ -667,7 +720,7 @@
     elements.importButton.addEventListener('click', importLinks);
     elements.urlInput.addEventListener('keydown', (event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') importLinks(); });
     elements.fileInput.addEventListener('change', () => uploadFiles(elements.fileInput.files));
-    elements.shuffleButton.addEventListener('click', shuffleRanking);
+    elements.shuffleButton.addEventListener('click', shuffleEntrances);
     elements.exportButton.addEventListener('click', openExportDialog);
     elements.exportSideButton.addEventListener('click', openExportDialog);
     elements.startRender.addEventListener('click', startRender);
@@ -676,8 +729,8 @@
     elements.refreshExports.addEventListener('click', loadRecentExports);
 
     elements.clipList.addEventListener('click', (event) => {
-      const move = event.target.closest('[data-move-down]');
-      if (move) { event.stopPropagation(); moveDown(move.dataset.moveDown); return; }
+      const move = event.target.closest('[data-move-later]');
+      if (move) { event.stopPropagation(); moveLater(move.dataset.moveLater); return; }
       const card = event.target.closest('[data-clip-id]');
       if (card) selectClip(card.dataset.clipId);
     });
@@ -771,7 +824,7 @@
       if (elements.previewVideo.currentTime >= clip.trimEnd - .025) {
         elements.previewVideo.pause();
         elements.playButton.classList.remove('playing');
-        if (selectedIndex() > 0) stepClip(1, true);
+        if (selectedEntranceIndex() < entranceSequence().length - 1) stepClip(1, true);
         else elements.previewVideo.currentTime = clip.trimStart;
       }
       updateTransport();
@@ -786,6 +839,10 @@
     elements.fitButton.addEventListener('click', () => { const clip = selectedClip(); if (clip) mutate(() => { clip.fit = clip.fit === 'cover' ? 'contain' : 'cover'; }); });
 
     elements.clipName.addEventListener('change', () => { const clip = selectedClip(); if (clip) mutate(() => { clip.name = elements.clipName.value.trim() || 'Untitled video'; }); });
+    elements.clipRank.addEventListener('change', () => {
+      const clip = selectedClip();
+      if (clip) mutate((draft) => assignClipRank(draft, clip.id, elements.clipRank.value));
+    });
     elements.trimStart.addEventListener('change', () => updateTrim());
     elements.trimEnd.addEventListener('change', () => updateTrim());
     elements.clipMuted.addEventListener('change', () => { const clip = selectedClip(); if (clip) mutate(() => { clip.muted = elements.clipMuted.checked; }); });
@@ -844,10 +901,13 @@
     const clip = selectedClip();
     if (!clip) return;
     const name = clip.name;
+    const entranceIndex = selectedEntranceIndex();
     mutate((draft) => {
-      const index = selectedIndex();
-      draft.clips.splice(index, 1);
-      draft.selectedId = draft.clips[Math.min(index, draft.clips.length - 1)]?.id || null;
+      const removedRank = clip.rank;
+      draft.clips = draft.clips.filter((item) => item.id !== clip.id);
+      draft.clips.forEach((item) => { if (item.rank > removedRank) item.rank -= 1; });
+      draft.entranceOrder = draft.entranceOrder.filter((id) => id !== clip.id);
+      draft.selectedId = draft.entranceOrder[Math.min(entranceIndex, draft.entranceOrder.length - 1)] || null;
     });
     toast(`“${name}” removed from this project.`);
   }
@@ -882,9 +942,13 @@
     renderPalette(elements.titlePalette, 'title');
     renderPalette(elements.listPalette, 'list');
     bindEvents();
+    let projectNeedsMigration = false;
     try {
       const [saved, health] = await Promise.all([api('/api/project'), api('/api/health')]);
-      if (saved.project) project = normalizeProject(saved.project);
+      if (saved.project) {
+        projectNeedsMigration = Number(saved.project.version) < 4;
+        project = normalizeProject(saved.project);
+      }
       const ready = health.tools?.ytdlp && health.tools?.ffmpeg && health.tools?.ffprobe;
       elements.toolStatus.className = `tool-status ${ready ? 'ready' : 'error'}`;
       elements.toolStatus.textContent = ready ? 'Media engine ready' : 'Run setup.ps1';
@@ -895,6 +959,7 @@
       toast(error.message, 'error');
     }
     renderAll();
+    if (projectNeedsMigration) await saveProject();
     loadRecentExports();
   }
 

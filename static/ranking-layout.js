@@ -61,11 +61,31 @@
     return { lines, wordGap };
   }
 
-  function buildRankingLayout(clips, activeIndex, settings) {
+  function buildEntranceSequence(clips, entranceOrder) {
     const items = Array.isArray(clips) ? clips : [];
+    const clipsById = new Map(items.map((clip) => [String(clip?.id || ''), clip]));
+    const requested = Array.isArray(entranceOrder) ? entranceOrder.map(String) : [];
+    const orderedIds = requested.filter((id, index, all) => clipsById.has(id) && all.indexOf(id) === index);
+    const included = new Set(orderedIds);
+    const missing = items
+      .filter((clip) => !included.has(String(clip?.id || '')))
+      .sort((left, right) => (Number(right?.rank) || 0) - (Number(left?.rank) || 0));
+    return [...orderedIds.map((id) => clipsById.get(id)), ...missing];
+  }
+
+  function buildRankingLayout(clips, revealedClipIds, settings) {
+    const suppliedItems = Array.isArray(clips) ? clips : [];
+    const items = suppliedItems
+      .map((clip, sourceIndex) => ({ clip, sourceIndex }))
+      .sort((left, right) => {
+        const rankDifference = Number(left.clip?.rank) - Number(right.clip?.rank);
+        return Number.isFinite(rankDifference) && rankDifference !== 0
+          ? rankDifference
+          : left.sourceIndex - right.sourceIndex;
+      });
     const count = Math.max(1, items.length);
-    const currentIndex = Math.min(items.length - 1, Math.max(0, Number(activeIndex) || 0));
-    const source = settings || items[0]?.list || {};
+    const revealed = new Set(Array.isArray(revealedClipIds) ? revealedClipIds.map(String) : []);
+    const source = settings || items[0]?.clip?.list || {};
     const requestedSize = clampNumber(source.size, 60, 24, 110);
     const fontSize = Math.min(requestedSize, Math.max(24, Math.floor(760 / count)));
     const rankSize = Math.round(fontSize * .92);
@@ -75,8 +95,9 @@
     const labelPaddingX = Math.max(3, Math.round(fontSize * .06));
     const labelPaddingY = Math.max(2, Math.round(fontSize * .04));
 
-    const entries = items.map((clip, index) => {
-      const rankText = `${index + 1}.`;
+    const entries = items.map(({ clip, sourceIndex }, index) => {
+      const rank = clampNumber(clip?.rank, index + 1, 1, Math.max(1, items.length));
+      const rankText = `${rank}.`;
       const rankWidth = measureTextWidth(rankText, rankSize);
       const rankGap = Math.max(4, Math.round(fontSize * .08));
       const opticalRankWidth = rankWidth - rankSize * .18;
@@ -88,7 +109,9 @@
       const rowHeight = Math.max(baseRowHeight, labelHeight, rankSize);
       return {
         index,
-        rank: index + 1,
+        sourceIndex,
+        clipId: String(clip?.id || ''),
+        rank,
         rankText,
         titleLeft,
         maxTextWidth,
@@ -96,7 +119,7 @@
         wordGap: wrapped.wordGap,
         labelHeight,
         rowHeight,
-        revealed: index >= currentIndex,
+        revealed: revealed.has(String(clip?.id || '')),
       };
     });
 
@@ -128,7 +151,7 @@
       textSafeRight: TEXT_SAFE_RIGHT,
       top,
       totalHeight,
-      activeIndex: currentIndex,
+      revealedClipIds: [...revealed],
       entries,
     };
   }
@@ -173,6 +196,7 @@
     RANK_LEFT,
     measureTextWidth,
     wrapTokens,
+    buildEntranceSequence,
     buildTitleLayout,
     buildRankingLayout,
   };

@@ -47,13 +47,13 @@
       </header>
 
       <div class="workspace">
-        <aside class="rank-rail" aria-label="Video ranking">
+        <aside class="rank-rail" aria-label="Video entrance sequence">
           <div class="panel-heading rank-heading">
             <div>
-              <span class="eyebrow">Sequence</span>
-              <h1>Rank stack <span id="clip-count">0</span></h1>
+              <span class="eyebrow">Playback</span>
+              <h1>Entrance order <span id="clip-count">0</span></h1>
             </div>
-            <button id="shuffle-button" class="icon-button warm" type="button" title="Shuffle ranking" aria-label="Shuffle ranking">
+            <button id="shuffle-button" class="icon-button warm" type="button" title="Shuffle video entrances" aria-label="Shuffle video entrances without changing ranks">
               <svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
             </button>
           </div>
@@ -74,12 +74,12 @@
             </div>
           </div>
 
-          <div id="clip-list" class="clip-list" aria-label="Ranked clips"></div>
+          <div id="clip-list" class="clip-list" aria-label="Video entrance order"></div>
 
           <div id="rank-empty" class="rail-empty">
             <span class="empty-stack" aria-hidden="true"><i></i><i></i><i></i></span>
-            <strong>Your ranking starts here</strong>
-            <p>Paste links above or upload videos from your computer.</p>
+            <strong>Your entrance sequence starts here</strong>
+            <p>Add videos, assign each rank in Clip settings, then shuffle their entrances.</p>
           </div>
         </aside>
 
@@ -145,7 +145,7 @@
           <section class="timeline" aria-label="Project timeline">
             <div class="timeline-heading">
               <div><span class="eyebrow">Final cut</span><strong id="timeline-duration">00:00</strong></div>
-              <span>Countdown plays from the lowest rank to #1</span>
+              <span>Entrance order · assigned ranks stay attached</span>
             </div>
             <div id="timeline-track" class="timeline-track"></div>
           </section>
@@ -202,7 +202,7 @@
                 <div><span class="eyebrow">Changes per video</span><h2>List text</h2></div>
                 <span id="editing-rank" class="editing-rank">No clip</span>
               </div>
-              <div id="no-clip-editor" class="editor-empty">Select a video in the rank stack to edit its list text.</div>
+              <div id="no-clip-editor" class="editor-empty">Select a video in the entrance sequence to edit its list text.</div>
               <div id="list-editor" class="rich-editor" hidden>
                 <label for="list-input">Entry copy</label>
                 <textarea id="list-input" rows="3" maxlength="180" placeholder="Why this clip earned its rank"></textarea>
@@ -237,6 +237,10 @@
               <div class="section-heading"><div><span class="eyebrow">Selected media</span><h2>Clip settings</h2></div></div>
               <div id="clip-panel-empty" class="editor-empty">Select a video to adjust its trim, crop, and sound.</div>
               <div id="clip-controls" hidden>
+                <div class="rank-assignment-card">
+                  <div><span class="eyebrow">Assigned rank</span><strong>Rank stays with this video</strong><small>Shuffle and drag change entrances only.</small></div>
+                  <label for="clip-rank"><span>Rank</span><select id="clip-rank" class="text-input"></select></label>
+                </div>
                 <label class="field-label" for="clip-name">Display name</label>
                 <input id="clip-name" class="text-input" maxlength="120" />
                 <div class="metric-card">
@@ -307,7 +311,7 @@
         <div id="export-confirm">
           <span class="modal-kicker">Final check</span>
           <h2>Turn this stack into one short.</h2>
-          <p id="export-summary">Your videos will be rendered in ranking order with all text styling burned into the MP4.</p>
+          <p id="export-summary">Your videos will render in entrance order while keeping their assigned ranks.</p>
           <div class="export-preview-strip" id="export-preview-strip"></div>
           <div class="export-specs"><span>1080 × 1920</span><i></i><span>30 FPS</span><i></i><span>MP4</span></div>
           <div class="modal-actions">

@@ -15,6 +15,7 @@ const crypto = require('crypto');
 const RankingLayout = require('./static/ranking-layout.js');
 
 const ROOT = __dirname;
+const PROJECT_VERSION = 4;
 const STATIC_DIR = path.join(ROOT, 'static');
 const DATA_DIR = path.join(ROOT, 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
@@ -479,7 +480,8 @@ async function wordDrawFilters(tokens, options) {
   return { filters, lineCount: lines.length, height: lines.length * lineHeight };
 }
 
-async function buildVideoFilters(project, clip, rank, tempDir) {
+async function buildVideoFilters(project, clip, revealedClipIds, tempDir) {
+  const rank = Number(clip.rank) || 1;
   const fit = clip.fit === 'contain' ? 'contain' : 'cover';
   const base = fit === 'contain'
     ? 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=12151F'
@@ -515,11 +517,11 @@ async function buildVideoFilters(project, clip, rank, tempDir) {
   }
 
   const clips = Array.isArray(project.clips) ? project.clips : [];
-  const ranking = RankingLayout.buildRankingLayout(clips, rank - 1, project.ranking);
+  const ranking = RankingLayout.buildRankingLayout(clips, revealedClipIds, project.ranking);
   const rankFontPath = fs.existsSync('C:\\Windows\\Fonts\\arialbd.ttf') ? 'C:\\Windows\\Fonts\\arialbd.ttf' : '';
   const rankFontPart = rankFontPath ? `fontfile='${escapeFilterPath(rankFontPath)}':` : '';
   for (const entry of ranking.entries) {
-    const item = clips[entry.index] || {};
+    const item = clips[entry.sourceIndex] || {};
     const list = item.list || {};
     const badgeColor = hexToFfmpeg(list.badgeColor || '#FF795C');
     const rankFile = path.join(tempDir, `rank-${rank}-${entry.rank}.txt`);
@@ -571,12 +573,12 @@ async function renderProject(jobId, project) {
   const tempDir = path.join(JOB_DIR, jobId);
   await fsp.mkdir(tempDir, { recursive: true });
   const segments = [];
-  const renderClips = [...clips].reverse();
+  const renderClips = RankingLayout.buildEntranceSequence(clips, project.entranceOrder);
   job.total = clips.length + 1;
 
   for (let index = 0; index < renderClips.length; index += 1) {
     const clip = renderClips[index];
-    const rank = clips.length - index;
+    const rank = Number(clip.rank) || index + 1;
     const source = clipSourcePath(clip);
     if (!source || !fs.existsSync(source)) throw new Error(`Source file for “${clip.name || `clip ${index + 1}`}” is missing.`);
     const media = await probeMedia(source);
@@ -584,7 +586,8 @@ async function renderProject(jobId, project) {
     const requestedEnd = safeNumber(clip.trimEnd, media.duration || 60, start + 0.1, media.duration || 36000);
     const duration = Math.max(0.1, requestedEnd - start);
     const segment = path.join(tempDir, `segment-${String(index).padStart(3, '0')}.mp4`);
-    const filters = await buildVideoFilters(project, clip, rank, tempDir);
+    const revealedIds = renderClips.slice(0, index + 1).map((item) => item.id);
+    const filters = await buildVideoFilters(project, clip, revealedIds, tempDir);
     const args = ['-y', '-hide_banner', '-ss', start.toFixed(3), '-t', duration.toFixed(3), '-i', source];
     if (!media.hasAudio) args.push('-f', 'lavfi', '-t', duration.toFixed(3), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
     args.push('-map', '0:v:0', '-map', media.hasAudio ? '0:a:0' : '1:a:0');
@@ -669,7 +672,17 @@ async function route(req, res) {
 
   if (pathname === '/api/project' && req.method === 'POST') {
     const body = await readJson(req);
-    await fsp.writeFile(PROJECT_FILE, JSON.stringify(body.project || body, null, 2), 'utf8');
+    const incomingProject = body.project || body;
+    try {
+      const savedProject = JSON.parse(await fsp.readFile(PROJECT_FILE, 'utf8'));
+      if (Number(savedProject.version) >= PROJECT_VERSION && Number(incomingProject.version) < PROJECT_VERSION) {
+        sendError(res, 409, 'This project is open in a newer RankCut editor. Reload this tab before saving.');
+        return;
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    await fsp.writeFile(PROJECT_FILE, JSON.stringify(incomingProject, null, 2), 'utf8');
     sendJson(res, 200, { ok: true, savedAt: new Date().toISOString() });
     return;
   }
