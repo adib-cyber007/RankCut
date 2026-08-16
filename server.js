@@ -12,9 +12,9 @@ const fsp = fs.promises;
 const path = require('path');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
+const RankingLayout = require('./static/ranking-layout.js');
 
 const ROOT = __dirname;
-const APP_VERSION = '2.1.1';
 const STATIC_DIR = path.join(ROOT, 'static');
 const DATA_DIR = path.join(ROOT, 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
@@ -166,11 +166,6 @@ function run(bin, args, options = {}) {
     });
     let stdout = '';
     let stderr = '';
-    let timedOut = false;
-    const timer = options.timeoutMs ? setTimeout(() => {
-      timedOut = true;
-      child.kill();
-    }, options.timeoutMs) : null;
     const collect = (key, chunk) => {
       const text = chunk.toString();
       if (key === 'stdout') stdout += text;
@@ -181,16 +176,8 @@ function run(bin, args, options = {}) {
     };
     child.stdout.on('data', (chunk) => collect('stdout', chunk));
     child.stderr.on('data', (chunk) => collect('stderr', chunk));
-    child.on('error', (error) => {
-      if (timer) clearTimeout(timer);
-      reject(error);
-    });
+    child.on('error', (error) => reject(error));
     child.on('close', (code) => {
-      if (timer) clearTimeout(timer);
-      if (timedOut) {
-        reject(new Error(`${path.basename(bin)} timed out while contacting the video platform.`));
-        return;
-      }
       if (code === 0) resolve({ stdout, stderr });
       else reject(new Error(`${path.basename(bin)} exited with code ${code}.\n${stderr.slice(-3000)}`));
     });
@@ -301,7 +288,7 @@ async function importFromUrl(sourceUrl) {
   const template = path.join(UPLOAD_DIR, `${id}.%(ext)s`);
   const commonArgs = [
     '--no-playlist', '--newline', '--no-part',
-    '--socket-timeout', '25', '--retries', '2', '--fragment-retries', '2',
+    '--socket-timeout', '35', '--retries', '4', '--fragment-retries', '4',
     '--retry-sleep', 'http:linear=1::3', '--retry-sleep', 'fragment:linear=1::3',
     '--impersonate', 'chrome',
     '--ffmpeg-location', TOOL_DIR,
@@ -324,7 +311,7 @@ async function importFromUrl(sourceUrl) {
   for (const attempt of attempts) {
     await removeImportArtifacts(id);
     try {
-      result = await run(YTDLP, [...commonArgs, ...attempt, url], { timeoutMs: 90_000 });
+      result = await run(YTDLP, [...commonArgs, ...attempt, url]);
       break;
     } catch (error) {
       lastError = error;
@@ -438,71 +425,52 @@ function hexToFfmpeg(color) {
   return normalizeColor(color).slice(1);
 }
 
+const OUTPUT_WIDTH = RankingLayout.OUTPUT_WIDTH;
+const OUTPUT_HEIGHT = RankingLayout.OUTPUT_HEIGHT;
+const TEXT_SAFE_LEFT = RankingLayout.TEXT_SAFE_LEFT;
+const TEXT_SAFE_RIGHT = RankingLayout.TEXT_SAFE_RIGHT;
+
+function drawtextEffect(effect, color) {
+  if (effect === 'none') return '';
+  if (effect === 'shadow') return ':shadowcolor=05060A@0.95:shadowx=3:shadowy=5';
+  if (effect === 'glow') return `:borderw=3:bordercolor=${hexToFfmpeg(color)}@0.55:shadowcolor=05060A@0.8:shadowx=2:shadowy=3`;
+  return ':borderw=2:bordercolor=05060A@1:shadowcolor=000000@0.75:shadowx=2:shadowy=3';
+}
+
 async function wordDrawFilters(tokens, options) {
   const fontSize = safeNumber(options.fontSize, 76, 24, 150);
   const maxWidth = safeNumber(options.maxWidth, 900, 300, 1000);
-  const lineHeight = Math.round(fontSize * 1.18);
-  const gap = Math.max(9, Math.round(fontSize * 0.18));
   const normalized = normalizeTokens(tokens, options.fallbackText);
   if (!normalized.length) return { filters: [], lineCount: 0, height: 0 };
-
-  // Arial Bold's glyphs vary too much for a flat character multiplier (M/W are
-  // nearly 3x the width of I). A small metrics table keeps independently
-  // colored drawtext runs aligned without requiring a native canvas module.
-  const glyphWidths = {
-    A: .72, B: .72, C: .72, D: .72, E: .67, F: .61, G: .78, H: .72,
-    I: .28, J: .50, K: .72, L: .56, M: .83, N: .72, O: .78, P: .67,
-    Q: .78, R: .72, S: .67, T: .61, U: .72, V: .72, W: .94, X: .72,
-    Y: .72, Z: .61, '0': .67, '1': .67, '2': .67, '3': .67, '4': .67,
-    '5': .67, '6': .67, '7': .67, '8': .67, '9': .67,
-  };
-  const measure = (text) => Math.max(
-    fontSize * .34,
-    Array.from(text).reduce((width, character) => width + (glyphWidths[character.toUpperCase()] || .56) * fontSize, 0)
-  );
-  const lines = [];
-  let line = [];
-  let lineWidth = 0;
-  for (const token of normalized) {
-    const width = measure(token.text);
-    const next = line.length ? lineWidth + gap + width : width;
-    if (line.length && next > maxWidth) {
-      lines.push({ words: line, width: lineWidth });
-      line = [];
-      lineWidth = 0;
-    }
-    line.push({ ...token, width });
-    lineWidth = lineWidth ? lineWidth + gap + width : width;
-  }
-  if (line.length) lines.push({ words: line, width: lineWidth });
+  const wrapped = options.lines
+    ? { lines: options.lines, wordGap: options.wordGap ?? Math.max(9, Math.round(fontSize * .18)) }
+    : RankingLayout.wrapTokens(normalized, fontSize, maxWidth, options.fallbackText);
+  const lines = wrapped.lines;
+  const gap = wrapped.wordGap;
+  const lineHeight = Math.round(options.lineHeight || fontSize * 1.18);
 
   const filters = [];
   const baseY = safeNumber(options.y, 150, 0, 1800);
   const fontPath = fs.existsSync('C:\\Windows\\Fonts\\arialbd.ttf')
     ? 'C:\\Windows\\Fonts\\arialbd.ttf'
     : fs.existsSync('C:\\Windows\\Fonts\\arial.ttf') ? 'C:\\Windows\\Fonts\\arial.ttf' : '';
-  const emojiFontPath = fs.existsSync('C:\\Windows\\Fonts\\seguiemj.ttf') ? 'C:\\Windows\\Fonts\\seguiemj.ttf' : fontPath;
-  const effect = ['outline', 'shadow', 'glow', 'none'].includes(options.effect) ? options.effect : 'outline';
-  const effectPart = effect === 'outline'
-    ? ':borderw=4:bordercolor=000000@1:shadowcolor=000000@0.65:shadowx=2:shadowy=3'
-    : effect === 'shadow'
-      ? ':shadowcolor=000000@0.9:shadowx=6:shadowy=8'
-      : effect === 'glow'
-        ? ':borderw=6:bordercolor=FFFFFF@0.35:shadowcolor=000000@0.8:shadowx=2:shadowy=3'
-        : '';
   let tokenIndex = 0;
   for (let row = 0; row < lines.length; row += 1) {
     const current = lines[row];
-    let x = Number.isFinite(options.x) ? options.x : options.align === 'left' ? 90 : options.align === 'right' ? 990 - current.width : (1080 - current.width) / 2;
+    const left = safeNumber(options.left, TEXT_SAFE_LEFT, 0, OUTPUT_WIDTH);
+    const right = safeNumber(options.right, TEXT_SAFE_RIGHT, left, OUTPUT_WIDTH);
+    let x = options.align === 'left'
+      ? left
+      : options.align === 'right' ? right - current.width : (OUTPUT_WIDTH - current.width) / 2;
     for (const token of current.words) {
       const textPath = path.join(options.tempDir, `${options.prefix}-${tokenIndex}.txt`);
       await fsp.writeFile(textPath, token.text, 'utf8');
-      const chosenFont = /[^\u0000-\uFFFF]/u.test(token.text) ? emojiFontPath : fontPath;
-      const fontPart = chosenFont ? `fontfile='${escapeFilterPath(chosenFont)}':` : '';
+      const fontPart = fontPath ? `fontfile='${escapeFilterPath(fontPath)}':` : '';
       filters.push(
         `drawtext=${fontPart}textfile='${escapeFilterPath(textPath)}':` +
         `fontcolor=${hexToFfmpeg(token.color)}:fontsize=${Math.round(fontSize)}:` +
-        `x=${Math.round(x)}:y=${Math.round(baseY + row * lineHeight)}` + effectPart
+        `x=${Math.round(x)}:y=${Math.round(baseY + row * lineHeight)}` +
+        drawtextEffect(options.effect || 'outline', token.color)
       );
       x += token.width + gap;
       tokenIndex += 1;
@@ -518,56 +486,74 @@ async function buildVideoFilters(project, clip, rank, tempDir) {
     : 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920';
   const filters = [base, 'setsar=1', 'fps=30', 'format=yuv420p'];
   const title = project.title || {};
-  const titleY = Math.round(1920 * safeNumber(title.y, 9, 0, 70) / 100);
   const titleWords = normalizeTokens(title.tokens, title.text || '');
   if (title.enabled !== false && titleWords.length) {
-    const approxLines = Math.max(1, Math.ceil(titleWords.reduce((sum, word) => sum + word.text.length + 1, 0) / 18));
-    const titleSize = safeNumber(title.size, 78, 28, 140);
-    const titleBoxHeight = Math.round(approxLines * titleSize * 1.25 + 46);
+    const titleLayout = RankingLayout.buildTitleLayout({ ...title, tokens: titleWords });
     const opacity = safeNumber(title.background, 66, 0, 100) / 100;
-    if (opacity > 0) filters.push(`drawbox=x=46:y=${Math.max(0, titleY - 25)}:w=988:h=${titleBoxHeight}:color=090B12@${opacity.toFixed(2)}:t=fill`);
+    if (opacity > 0) {
+      filters.push(
+        `drawbox=x=${titleLayout.boxX}:y=${titleLayout.boxY}:w=${titleLayout.boxWidth}:` +
+        `h=${titleLayout.boxHeight}:color=090B12@${opacity.toFixed(2)}:t=fill`,
+      );
+    }
     const drawn = await wordDrawFilters(titleWords, {
-      fontSize: titleSize, maxWidth: 900, y: titleY, align: title.align || 'center',
-      tempDir, prefix: `title-${rank}`, fallbackText: title.text || '', effect: title.effect,
+      fontSize: titleLayout.fontSize,
+      lineHeight: titleLayout.lineHeight,
+      maxWidth: TEXT_SAFE_RIGHT - TEXT_SAFE_LEFT,
+      y: titleLayout.textY,
+      align: titleLayout.align,
+      left: TEXT_SAFE_LEFT,
+      right: TEXT_SAFE_RIGHT,
+      lines: titleLayout.lines,
+      wordGap: titleLayout.wordGap,
+      tempDir,
+      prefix: `title-${rank}`,
+      fallbackText: title.text || '',
+      effect: title.effect || 'outline',
     });
     filters.push(...drawn.filters);
   }
 
-  const list = clip.list || {};
-  const rankedClips = Array.isArray(project.clips) ? project.clips : [];
-  const listWords = normalizeTokens(list.tokens, list.text || '');
-  if (rankedClips.length) {
-    const desiredSize = safeNumber(list.size, 60, 24, 110);
-    const rowHeight = Math.max(48, Math.min(Math.round(desiredSize * 1.35), Math.floor(720 / rankedClips.length)));
-    const totalHeight = rowHeight * rankedClips.length;
-    const requestedTop = Math.round(1920 * safeNumber(list.y, 73, 15, 92) / 100);
-    const listTop = Math.max(360, Math.min(requestedTop, 1810 - totalHeight));
-    const numberSize = Math.max(25, Math.min(Math.round(desiredSize * .78), Math.round(rowHeight * .72)));
-    const fontPath = fs.existsSync('C:\\Windows\\Fonts\\arialbd.ttf') ? 'C:\\Windows\\Fonts\\arialbd.ttf' : '';
-    const fontPart = fontPath ? `fontfile='${escapeFilterPath(fontPath)}':` : '';
+  const clips = Array.isArray(project.clips) ? project.clips : [];
+  const ranking = RankingLayout.buildRankingLayout(clips, rank - 1, project.ranking);
+  const rankFontPath = fs.existsSync('C:\\Windows\\Fonts\\arialbd.ttf') ? 'C:\\Windows\\Fonts\\arialbd.ttf' : '';
+  const rankFontPart = rankFontPath ? `fontfile='${escapeFilterPath(rankFontPath)}':` : '';
+  for (const entry of ranking.entries) {
+    const item = clips[entry.index] || {};
+    const list = item.list || {};
+    const badgeColor = hexToFfmpeg(list.badgeColor || '#FF795C');
+    const rankFile = path.join(tempDir, `rank-${rank}-${entry.rank}.txt`);
+    await fsp.writeFile(rankFile, entry.rankText, 'utf8');
+    filters.push(
+      `drawtext=${rankFontPart}textfile='${escapeFilterPath(rankFile)}':` +
+      `fontcolor=${badgeColor}:fontsize=${ranking.rankSize}:x=${ranking.rankLeft}:y=${entry.numberY}:` +
+      `borderw=2:bordercolor=090B12@0.9:shadowcolor=000000@0.75:shadowx=2:shadowy=3`,
+    );
 
-    for (let index = 0; index < rankedClips.length; index += 1) {
-      const rowClip = rankedClips[index] || {};
-      const rowList = rowClip.list || {};
-      const rowY = listTop + index * rowHeight;
-      const rankPath = path.join(tempDir, `countdown-${rank}-${index}.txt`);
-      await fsp.writeFile(rankPath, `${index + 1}.`, 'utf8');
-      const color = hexToFfmpeg(rowList.badgeColor || '#FFFFFF');
-      filters.push(`drawtext=${fontPart}textfile='${escapeFilterPath(rankPath)}':fontcolor=${color}:fontsize=${numberSize}:x=76:y=${Math.round(rowY + (rowHeight - numberSize) / 2)}:borderw=3:bordercolor=000000@1:shadowcolor=000000@0.75:shadowx=2:shadowy=3`);
+    if (!entry.revealed || !entry.lines.length) continue;
+    const opacity = safeNumber(list.background, 72, 0, 100) / 100;
+    if (opacity > 0) {
+      filters.push(
+        `drawbox=x=${entry.boxLeft}:y=${entry.labelY}:w=${entry.boxRight - entry.boxLeft}:` +
+        `h=${entry.labelHeight}:color=090B12@${opacity.toFixed(2)}:t=fill`,
+      );
     }
-
-    if (listWords.length) {
-      const activeY = listTop + (rank - 1) * rowHeight;
-      const opacity = safeNumber(list.background, 72, 0, 100) / 100;
-      if (opacity > 0) filters.push(`drawbox=x=164:y=${activeY + 2}:w=870:h=${Math.max(42, rowHeight - 4)}:color=090B12@${opacity.toFixed(2)}:t=fill`);
-      const characterCount = listWords.reduce((sum, word) => sum + Array.from(word.text).length + 1, 0);
-      const activeSize = Math.max(24, Math.min(desiredSize, 790 / Math.max(1, characterCount * .62)));
-      const drawn = await wordDrawFilters(listWords, {
-        fontSize: activeSize, maxWidth: 820, y: activeY + Math.max(2, (rowHeight - activeSize) / 2),
-        x: 190, align: 'left', tempDir, prefix: `list-${rank}`, fallbackText: list.text || '', effect: list.effect,
-      });
-      filters.push(...drawn.filters);
-    }
+    const drawn = await wordDrawFilters(list.tokens, {
+      fontSize: ranking.fontSize,
+      lineHeight: ranking.lineHeight,
+      maxWidth: entry.maxTextWidth,
+      y: entry.textY,
+      align: 'left',
+      left: entry.titleLeft,
+      right: ranking.textSafeRight,
+      lines: entry.lines,
+      wordGap: entry.wordGap,
+      effect: list.effect || 'outline',
+      tempDir,
+      prefix: `list-${rank}-${entry.rank}`,
+      fallbackText: list.text || '',
+    });
+    filters.push(...drawn.filters);
   }
   return filters.join(',');
 }
@@ -585,10 +571,12 @@ async function renderProject(jobId, project) {
   const tempDir = path.join(JOB_DIR, jobId);
   await fsp.mkdir(tempDir, { recursive: true });
   const segments = [];
+  const renderClips = [...clips].reverse();
   job.total = clips.length + 1;
 
-  for (let index = 0; index < clips.length; index += 1) {
-    const clip = clips[index];
+  for (let index = 0; index < renderClips.length; index += 1) {
+    const clip = renderClips[index];
+    const rank = clips.length - index;
     const source = clipSourcePath(clip);
     if (!source || !fs.existsSync(source)) throw new Error(`Source file for “${clip.name || `clip ${index + 1}`}” is missing.`);
     const media = await probeMedia(source);
@@ -596,7 +584,7 @@ async function renderProject(jobId, project) {
     const requestedEnd = safeNumber(clip.trimEnd, media.duration || 60, start + 0.1, media.duration || 36000);
     const duration = Math.max(0.1, requestedEnd - start);
     const segment = path.join(tempDir, `segment-${String(index).padStart(3, '0')}.mp4`);
-    const filters = await buildVideoFilters(project, clip, index + 1, tempDir);
+    const filters = await buildVideoFilters(project, clip, rank, tempDir);
     const args = ['-y', '-hide_banner', '-ss', start.toFixed(3), '-t', duration.toFixed(3), '-i', source];
     if (!media.hasAudio) args.push('-f', 'lavfi', '-t', duration.toFixed(3), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
     args.push('-map', '0:v:0', '-map', media.hasAudio ? '0:a:0' : '1:a:0');
@@ -609,7 +597,7 @@ async function renderProject(jobId, project) {
       '-crf', String(safeNumber(project.export?.crf, 20, 16, 30)), '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', segment,
     );
-    job.message = `Rendering ${index + 1} of ${clips.length}: ${clip.name || 'video'}`;
+    job.message = `Rendering ${index + 1} of ${clips.length}: rank ${rank} — ${clip.name || 'video'}`;
     job.progress = Math.round((index / job.total) * 100);
     await run(FFMPEG, args, {
       onOutput(text) {
@@ -659,8 +647,6 @@ async function route(req, res) {
     sendJson(res, 200, {
       ok: true,
       app: 'RankCut Studio',
-      version: APP_VERSION,
-      pid: process.pid,
       tools: {
         ytdlp: fs.existsSync(YTDLP),
         ffmpeg: fs.existsSync(FFMPEG),
@@ -673,16 +659,6 @@ async function route(req, res) {
   if (pathname === '/api/project' && req.method === 'GET') {
     try {
       const project = JSON.parse(await fsp.readFile(PROJECT_FILE, 'utf8'));
-      // Do not resurrect stale cards when a source file was moved or removed.
-      if (Array.isArray(project.clips)) {
-        project.clips = project.clips.filter((clip) => {
-          const relativeFile = String(clip?.file || '').replaceAll('/', path.sep);
-          return relativeFile && fs.existsSync(path.join(ROOT, relativeFile));
-        });
-        if (!project.clips.some((clip) => clip.id === project.selectedId)) {
-          project.selectedId = project.clips[0]?.id || null;
-        }
-      }
       sendJson(res, 200, { ok: true, project });
     } catch (error) {
       if (error.code === 'ENOENT') sendJson(res, 200, { ok: true, project: null });

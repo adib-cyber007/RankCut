@@ -1,12 +1,9 @@
-param([switch]$NoBrowser)
-
 $ErrorActionPreference = 'Stop'
 $AppRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LocalNode = Join-Path $AppRoot 'tools\node.exe'
 $ServerScript = Join-Path $AppRoot 'server.js'
 $HealthUrl = 'http://127.0.0.1:4174/api/health'
 $AppUrl = 'http://127.0.0.1:4174/'
-$ExpectedVersion = '2.1.1'
 
 if (-not (Test-Path -LiteralPath (Join-Path $AppRoot 'tools\ffmpeg.exe')) -or
     -not (Test-Path -LiteralPath (Join-Path $AppRoot 'tools\ffprobe.exe')) -or
@@ -34,23 +31,7 @@ if (-not $NodeCommand) { throw 'Node.js could not be installed. Install Node.js 
 $AlreadyRunning = $false
 try {
   $Health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2
-  if ($Health.ok -and $Health.version -eq $ExpectedVersion) {
-    $AlreadyRunning = $true
-  } elseif ($Health.ok -and $Health.pid) {
-    Write-Host 'Replacing an older RankCut Studio server...' -ForegroundColor Yellow
-    Stop-Process -Id ([int]$Health.pid) -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 400
-  } elseif ($Health.ok -and $Health.app -eq 'RankCut Studio') {
-    Write-Host 'Replacing an older RankCut Studio server...' -ForegroundColor Yellow
-    $Listener = Get-NetTCPConnection -LocalPort 4174 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-    $RankCutProcessId = if ($Listener) { [int]$Listener.OwningProcess } else { $null }
-    if (-not $RankCutProcessId) {
-      $NetstatLine = netstat -ano -p TCP | Select-String -Pattern '^\s*TCP\s+127\.0\.0\.1:4174\s+.*LISTENING\s+(\d+)\s*$' | Select-Object -First 1
-      if ($NetstatLine -and $NetstatLine.Matches.Count) { $RankCutProcessId = [int]$NetstatLine.Matches[0].Groups[1].Value }
-    }
-    if ($RankCutProcessId) { Stop-Process -Id $RankCutProcessId -Force -ErrorAction SilentlyContinue }
-    Start-Sleep -Milliseconds 400
-  }
+  if ($Health.ok) { $AlreadyRunning = $true }
 } catch {}
 
 if (-not $AlreadyRunning) {
@@ -60,7 +41,7 @@ if (-not $AlreadyRunning) {
     Start-Sleep -Milliseconds 250
     try {
       $Health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2
-      if ($Health.ok -and $Health.version -eq $ExpectedVersion) { $Ready = $true; break }
+      if ($Health.ok) { $Ready = $true; break }
     } catch {}
   }
   if (-not $Ready) {
@@ -69,9 +50,5 @@ if (-not $AlreadyRunning) {
   }
 }
 
-if (-not $NoBrowser) {
-  Start-Process $AppUrl
-  Write-Host 'RankCut Studio is open in your browser.' -ForegroundColor Green
-} else {
-  Write-Host 'RankCut Studio server is ready.' -ForegroundColor Green
-}
+Start-Process $AppUrl
+Write-Host 'RankCut Studio is open in your browser.' -ForegroundColor Green

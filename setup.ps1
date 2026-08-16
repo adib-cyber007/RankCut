@@ -37,11 +37,7 @@ $YtDlpPath = Join-Path $ToolsDir 'yt-dlp.exe'
 if (-not (Test-Path -LiteralPath $YtDlpPath)) {
   Get-RemoteFile -Uri 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -Destination $YtDlpPath
 } else {
-  Write-Host "  Updating yt-dlp extractors..." -ForegroundColor DarkGray
-  & $YtDlpPath -U
-  if ($LASTEXITCODE -ne 0) {
-    Write-Host "  Automatic update was unavailable; keeping the installed yt-dlp." -ForegroundColor Yellow
-  }
+  Write-Host "  yt-dlp already installed." -ForegroundColor DarkGray
 }
 
 $FfmpegPath = Join-Path $ToolsDir 'ffmpeg.exe'

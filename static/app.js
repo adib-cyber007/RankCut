@@ -1,6 +1,8 @@
 (() => {
   'use strict';
 
+  const RankingLayout = globalThis.RankingLayout;
+  if (!RankingLayout) throw new Error('The shared ranking layout module did not load.');
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const PALETTE = ['#FFFFFF', '#FFE66D', '#FF795C', '#78D8BE', '#77AEFF', '#B99CFF', '#171925'];
@@ -30,7 +32,7 @@
   };
 
   const defaultProject = () => ({
-    version: 2,
+    version: 3,
     name: 'My ranked short',
     selectedId: null,
     title: {
@@ -43,6 +45,7 @@
       ],
       size: 78, y: 9, background: 66, align: 'center', effect: 'outline',
     },
+    ranking: { size: 60, y: 73 },
     clips: [],
     export: { crf: 20, preset: 'medium' },
     updatedAt: new Date().toISOString(),
@@ -130,7 +133,13 @@
     if (!['outline', 'shadow', 'glow', 'none'].includes(next.title.effect)) next.title.effect = 'outline';
     next.title.tokens = Array.isArray(next.title.tokens) ? next.title.tokens : normalizedTokens(next.title.text, [], '#FFFFFF');
     next.clips = Array.isArray(next.clips) ? next.clips.map(ensureClipShape) : [];
+    const rankingSource = next.ranking || next.clips[0]?.list || base.ranking;
+    next.ranking = {
+      size: clamp(rankingSource.size ?? base.ranking.size, 24, 110),
+      y: clamp(rankingSource.y ?? base.ranking.y, 15, 92),
+    };
     next.export = { ...base.export, ...(next.export || {}) };
+    next.version = 3;
     if (!next.clips.some((clip) => clip.id === next.selectedId)) next.selectedId = next.clips[0]?.id || null;
     return next;
   }
@@ -221,6 +230,16 @@
     return (tokens || []).map((token, index) => `<span data-token="${index}" style="color:${escapeHtml(token.color || '#FFFFFF')}">${escapeHtml(token.text)}${index < tokens.length - 1 ? ' ' : ''}</span>`).join('');
   }
 
+  function coloredLineMarkup(line, wordGap, className, style = '') {
+    return `<span class="${className}"${style ? ` style="${style}"` : ''}>${line.words.map((token, index) => (
+      `<span style="color:${escapeHtml(token.color || '#FFFFFF')};${index < line.words.length - 1 ? `margin-right:${wordGap}px` : ''}">${escapeHtml(token.text)}</span>`
+    )).join('')}</span>`;
+  }
+
+  function exportSequence() {
+    return [...project.clips].reverse();
+  }
+
   function renderPalette(container, target) {
     container.innerHTML = PALETTE.map((color) => `<button class="swatch" data-color="${color}" data-target="${target}" type="button" style="--swatch:${color}" aria-label="Apply ${color}"></button>`).join('');
   }
@@ -251,9 +270,10 @@
   function renderTimeline() {
     const total = project.clips.reduce((sum, clip) => sum + clipDuration(clip), 0);
     elements.timelineDuration.textContent = formatTime(total);
-    elements.timelineTrack.innerHTML = project.clips.map((clip, index) => `
+    const sequence = project.clips.map((clip, index) => ({ clip, rank: index + 1 })).reverse();
+    elements.timelineTrack.innerHTML = sequence.map(({ clip, rank }) => `
       <button type="button" class="timeline-clip ${clip.id === project.selectedId ? 'selected' : ''}" data-timeline-id="${escapeHtml(clip.id)}" style="--duration:${Math.max(1, clipDuration(clip))}">
-        ${clip.poster ? `<img src="${escapeHtml(clip.poster)}" alt="" />` : ''}<span>${String(index + 1).padStart(2, '0')}</span><i>${formatTime(clipDuration(clip), true)}</i>
+        ${clip.poster ? `<img src="${escapeHtml(clip.poster)}" alt="" />` : ''}<span>${String(rank).padStart(2, '0')}</span><i>${formatTime(clipDuration(clip), true)}</i>
       </button>
     `).join('');
   }
@@ -280,27 +300,35 @@
     }
     elements.phoneStage.classList.toggle('contain', clip.fit === 'contain');
     elements.fitButton.textContent = clip.fit === 'contain' ? 'Fit inside' : 'Fill frame';
-    elements.titleOverlay.hidden = project.title.enabled === false || !project.title.tokens?.length;
-    elements.titleOverlay.innerHTML = tokenMarkup(project.title.tokens);
-    elements.titleOverlay.style.top = `${project.title.y}%`;
+    const scale = elements.phoneStage.clientWidth / RankingLayout.OUTPUT_WIDTH;
+    const titleLayout = RankingLayout.buildTitleLayout(project.title);
+    elements.titleOverlay.hidden = project.title.enabled === false || !titleLayout.lines.length;
+    elements.titleOverlay.style.left = `${titleLayout.boxX * scale}px`;
+    elements.titleOverlay.style.right = 'auto';
+    elements.titleOverlay.style.top = `${titleLayout.boxY * scale}px`;
+    elements.titleOverlay.style.width = `${titleLayout.boxWidth * scale}px`;
+    elements.titleOverlay.style.height = `${titleLayout.boxHeight * scale}px`;
     elements.titleOverlay.style.background = `rgba(9,11,18,${project.title.background / 100})`;
-    elements.titleOverlay.style.fontSize = `${Math.max(12, elements.phoneStage.clientWidth * project.title.size / 1080)}px`;
+    elements.titleOverlay.style.fontSize = `${titleLayout.fontSize * scale}px`;
+    elements.titleOverlay.style.lineHeight = `${titleLayout.lineHeight * scale}px`;
+    elements.titleOverlay.innerHTML = titleLayout.lines.map((line) => coloredLineMarkup(
+      line,
+      titleLayout.wordGap * scale,
+      'title-line',
+      `left:${(line.x - titleLayout.boxX) * scale}px;top:${(line.y - titleLayout.boxY - titleLayout.fontSize * .36) * scale}px`,
+    )).join('');
     elements.titleOverlay.classList.remove('effect-outline', 'effect-shadow', 'effect-glow', 'effect-none');
     elements.titleOverlay.classList.add(`effect-${project.title.effect || 'outline'}`);
-    elements.titleOverlay.classList.toggle('align-left', project.title.align === 'left');
-    elements.titleOverlay.classList.toggle('align-right', project.title.align === 'right');
 
     const rank = selectedIndex() + 1;
-    const rowHeightPercent = Math.min(6.2, 34 / Math.max(1, project.clips.length));
-    const maxTop = Math.max(22, 91 - project.clips.length * rowHeightPercent);
-    elements.countdownOverlay.style.top = `${Math.min(clip.list.y, maxTop)}%`;
-    elements.countdownOverlay.style.fontSize = `${Math.max(9, elements.phoneStage.clientWidth * Math.min(clip.list.size, 760 / Math.max(1, project.clips.length)) / 1080)}px`;
-    elements.countdownOverlay.innerHTML = project.clips.map((item, index) => {
-      const active = index === rank - 1;
+    const ranking = RankingLayout.buildRankingLayout(project.clips, rank - 1, project.ranking);
+    elements.countdownOverlay.innerHTML = ranking.entries.map((entry) => {
+      const item = project.clips[entry.index];
       const opacity = item.list.background / 100;
-      return `<div class="countdown-row ${active ? 'active' : ''}" style="--rank-color:${escapeHtml(item.list.badgeColor)};--label-bg:rgba(9,11,18,${opacity})">
-        <span class="countdown-number">${index + 1}.</span>
-        <span class="countdown-label effect-${escapeHtml(item.list.effect || 'outline')}">${active ? tokenMarkup(item.list.tokens) : ''}</span>
+      const lines = entry.revealed ? entry.lines.map((line) => coloredLineMarkup(line, entry.wordGap * scale, 'ranking-line')).join('') : '';
+      return `<div class="countdown-row ${entry.revealed ? 'revealed' : ''}" style="top:${entry.rowTop * scale}px;height:${entry.rowHeight * scale}px;--rank-color:${escapeHtml(item.list.badgeColor)}">
+        <span class="countdown-number" style="left:${ranking.rankLeft * scale}px;top:${(entry.numberY - entry.rowTop) * scale}px;font-size:${ranking.rankSize * scale}px;line-height:${ranking.rankSize * scale}px">${entry.rankText}</span>
+        <span class="countdown-label effect-${escapeHtml(item.list.effect || 'outline')}" style="left:${entry.boxLeft * scale}px;right:${(ranking.outputWidth - entry.boxRight) * scale}px;top:${(entry.labelY - entry.rowTop) * scale}px;height:${entry.labelHeight * scale}px;padding:${ranking.labelPaddingY * scale}px ${ranking.labelPaddingX * scale}px;font-size:${ranking.fontSize * scale}px;line-height:${ranking.lineHeight * scale}px;background:rgba(9,11,18,${entry.revealed ? opacity : 0})">${lines}</span>
       </div>`;
     }).join('');
     elements.durationTime.textContent = formatTime(clipDuration(clip), true);
@@ -327,10 +355,10 @@
     if (!clip) return;
     elements.listInput.value = clip.list.text;
     renderTokenField(elements.listTokens, clip.list.tokens, listSelection, 'list');
-    elements.listSize.value = clip.list.size;
-    elements.listSizeValue.textContent = clip.list.size;
-    elements.listY.value = clip.list.y;
-    elements.listYValue.textContent = `${clip.list.y}%`;
+    elements.listSize.value = project.ranking.size;
+    elements.listSizeValue.textContent = project.ranking.size;
+    elements.listY.value = project.ranking.y;
+    elements.listYValue.textContent = `${project.ranking.y}%`;
     elements.listBackground.value = clip.list.background;
     elements.listBackgroundValue.textContent = `${clip.list.background}%`;
     elements.badgeColor.value = clip.list.badgeColor;
@@ -374,7 +402,137 @@
 
   function updateTransport() {
     const clip = selectedClip();
-    if…1216 tokens truncated…(project.clips.length < 2) {
+    if (!clip) return;
+    const current = clamp(elements.previewVideo.currentTime || clip.trimStart, clip.trimStart, clip.trimEnd);
+    const elapsed = current - clip.trimStart;
+    elements.currentTime.textContent = formatTime(elapsed, true);
+    elements.durationTime.textContent = formatTime(clipDuration(clip), true);
+    elements.scrubber.max = clipDuration(clip);
+    elements.scrubber.value = elapsed;
+  }
+
+  function selectClip(id, { resetListSelection = true } = {}) {
+    if (!project.clips.some((clip) => clip.id === id)) return;
+    project.selectedId = id;
+    if (resetListSelection) listSelection = new Set();
+    scheduleSave();
+    renderAll();
+  }
+
+  function stepClip(direction, autoplay = false) {
+    if (!project.clips.length) return;
+    const sequence = exportSequence();
+    const index = sequence.findIndex((clip) => clip.id === project.selectedId);
+    const next = (index + direction + sequence.length) % sequence.length;
+    selectClip(sequence[next].id);
+    if (autoplay) elements.previewVideo.addEventListener('canplay', () => elements.previewVideo.play().catch(() => {}), { once: true });
+  }
+
+  function updateClipText(target, value) {
+    if (target === 'title') {
+      const previous = project.title.tokens;
+      project.title.text = value;
+      project.title.tokens = normalizedTokens(value, previous, '#FFFFFF');
+      titleSelection = new Set();
+    } else {
+      const clip = selectedClip();
+      if (!clip) return;
+      const previous = clip.list.tokens;
+      clip.list.text = value;
+      clip.list.tokens = normalizedTokens(value, previous, '#FFFFFF');
+      listSelection = new Set();
+    }
+    project.updatedAt = new Date().toISOString();
+    scheduleSave();
+    renderPreview();
+    renderTextInspector();
+  }
+
+  function applyTokenColor(target, color) {
+    const selection = target === 'title' ? titleSelection : listSelection;
+    if (!selection.size) {
+      toast('Select one or more words first.', 'warning');
+      return;
+    }
+    pushHistory();
+    const tokens = target === 'title' ? project.title.tokens : selectedClip()?.list.tokens;
+    if (!tokens) return;
+    selection.forEach((index) => { if (tokens[index]) tokens[index].color = color.toUpperCase(); });
+    scheduleSave();
+    renderTextInspector();
+    renderPreview();
+  }
+
+  async function importLinks() {
+    if (importBusy) return;
+    const urls = extractImportUrls(elements.urlInput.value);
+    if (!urls.length) {
+      toast('Paste a TikTok or YouTube Share link. Extra share-message text is okay.', 'warning');
+      elements.urlInput.focus();
+      return;
+    }
+    importBusy = true;
+    elements.importButton.disabled = true;
+    elements.importProgress.hidden = false;
+    let imported = 0;
+    for (let index = 0; index < urls.length; index += 1) {
+      const span = $('span', elements.importProgress);
+      const platform = urls[index].includes('tiktok') ? 'TikTok' : 'YouTube';
+      span.textContent = `Downloading ${platform} video ${index + 1} of ${urls.length}…`;
+      try {
+        const data = await api('/api/import', { method: 'POST', body: { url: urls[index] } });
+        const clip = ensureClipShape(data.clip);
+        project.clips.push(clip);
+        project.selectedId = clip.id;
+        imported += 1;
+        scheduleSave();
+        renderAll();
+      } catch (error) {
+        toast(`Import ${index + 1} failed: ${error.message}`, 'error', 5200);
+      }
+    }
+    importBusy = false;
+    elements.importButton.disabled = false;
+    elements.importProgress.hidden = true;
+    if (imported) {
+      elements.urlInput.value = '';
+      toast(`${imported} video${imported === 1 ? '' : 's'} added to the rank stack.`);
+    }
+  }
+
+  async function uploadFiles(files) {
+    const videos = [...files];
+    if (!videos.length || importBusy) return;
+    importBusy = true;
+    elements.importProgress.hidden = false;
+    elements.importButton.disabled = true;
+    let imported = 0;
+    for (let index = 0; index < videos.length; index += 1) {
+      const file = videos[index];
+      $('span', elements.importProgress).textContent = `Uploading ${index + 1} of ${videos.length}: ${file.name}`;
+      try {
+        const data = await api(`/api/upload?filename=${encodeURIComponent(file.name)}`, {
+          method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file,
+        });
+        const clip = ensureClipShape(data.clip);
+        project.clips.push(clip);
+        project.selectedId = clip.id;
+        imported += 1;
+        scheduleSave();
+        renderAll();
+      } catch (error) {
+        toast(`${file.name}: ${error.message}`, 'error', 5200);
+      }
+    }
+    importBusy = false;
+    elements.importProgress.hidden = true;
+    elements.importButton.disabled = false;
+    elements.fileInput.value = '';
+    if (imported) toast(`${imported} local video${imported === 1 ? '' : 's'} added.`);
+  }
+
+  function shuffleRanking() {
+    if (project.clips.length < 2) {
       toast('Add at least two videos to shuffle.', 'warning');
       return;
     }
@@ -425,9 +583,9 @@
     elements.exportRunning.hidden = true;
     elements.exportComplete.hidden = true;
     const duration = project.clips.reduce((sum, clip) => sum + clipDuration(clip), 0);
-    elements.exportSummary.textContent = `${project.clips.length} video${project.clips.length === 1 ? '' : 's'} · ${formatTime(duration, true)} total. Titles, word colors, rank badges, and list text will be burned into the MP4.`;
-    elements.exportPreviewStrip.innerHTML = project.clips.slice(0, 7).map((clip, index) => `
-      <span class="export-preview-card" style="--offset:${Math.abs(index - Math.min(3, project.clips.length / 2)) * 3}px;--rotate:${(index - 3) * 2}deg">${clip.poster ? `<img src="${escapeHtml(clip.poster)}" alt="" />` : ''}<span>${String(index + 1).padStart(2, '0')}</span></span>
+    elements.exportSummary.textContent = `${project.clips.length} video${project.clips.length === 1 ? '' : 's'} · ${formatTime(duration, true)} total. The countdown plays from rank ${project.clips.length} to #1, retaining every revealed title.`;
+    elements.exportPreviewStrip.innerHTML = project.clips.map((clip, index) => ({ clip, rank: index + 1 })).reverse().slice(0, 7).map(({ clip, rank }, index) => `
+      <span class="export-preview-card" style="--offset:${Math.abs(index - Math.min(3, project.clips.length / 2)) * 3}px;--rotate:${(index - 3) * 2}deg">${clip.poster ? `<img src="${escapeHtml(clip.poster)}" alt="" />` : ''}<span>${String(rank).padStart(2, '0')}</span></span>
     `).join('');
     elements.exportDialog.showModal();
   }
@@ -613,7 +771,7 @@
       if (elements.previewVideo.currentTime >= clip.trimEnd - .025) {
         elements.previewVideo.pause();
         elements.playButton.classList.remove('playing');
-        if (selectedIndex() < project.clips.length - 1) stepClip(1, true);
+        if (selectedIndex() > 0) stepClip(1, true);
         else elements.previewVideo.currentTime = clip.trimStart;
       }
       updateTransport();
@@ -662,6 +820,7 @@
   function rangeUpdate(target, property, value) {
     const numeric = Number(value);
     if (target === 'title') project.title[property] = numeric;
+    else if (property === 'size' || property === 'y') project.ranking[property] = numeric;
     else { const clip = selectedClip(); if (!clip) return; clip.list[property] = numeric; }
     project.updatedAt = new Date().toISOString();
     scheduleSave();

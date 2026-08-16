@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#f5f6fa" />
     <meta name="description" content="Local-first ranked shorts editor for TikTok and YouTube videos." />
     <title>RankCut Studio</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -59,7 +60,7 @@
 
           <div class="import-box">
             <label for="url-input">Paste TikTok or YouTube links</label>
-            <textarea id="url-input" rows="3" placeholder="Paste Share links or copied share text…"></textarea>
+            <textarea id="url-input" rows="3" placeholder="One link per line…"></textarea>
             <div class="import-box-footer">
               <span><b>YT</b> + <b>TT</b> supported</span>
               <button id="import-button" class="button compact" type="button">
@@ -116,11 +117,8 @@
 
             <div id="phone-stage" class="phone-stage" hidden>
               <video id="preview-video" playsinline preload="metadata"></video>
-              <div class="safe-area top" aria-hidden="true"></div>
-              <div class="safe-area bottom" aria-hidden="true"></div>
               <div id="title-overlay" class="video-title-overlay"></div>
               <div id="countdown-overlay" class="countdown-overlay" aria-label="Persistent ranking countdown"></div>
-              <div class="platform-ghost" aria-hidden="true"><i></i><i></i><i></i></div>
             </div>
           </div>
 
@@ -147,7 +145,7 @@
           <section class="timeline" aria-label="Project timeline">
             <div class="timeline-heading">
               <div><span class="eyebrow">Final cut</span><strong id="timeline-duration">00:00</strong></div>
-              <span>Ranking order becomes export order</span>
+              <span>Countdown plays from the lowest rank to #1</span>
             </div>
             <div id="timeline-track" class="timeline-track"></div>
           </section>
@@ -226,12 +224,12 @@
                   <label>Vertical position <output id="list-y-value">73%</output><input id="list-y" type="range" min="25" max="88" value="73" /></label>
                   <label>Backdrop <output id="list-background-value">72%</output><input id="list-background" type="range" min="0" max="100" value="72" /></label>
                 </div>
-                <div class="badge-color-row"><span>Rank badge</span><input id="badge-color" type="color" value="#ff795c" /></div>
+                <div class="badge-color-row"><span>Rank number</span><input id="badge-color" type="color" value="#ff795c" /></div>
                 <div class="effect-picker" data-effect-target="list">
                   <span>Text effect</span>
                   <div><button type="button" data-effect="outline">Outline</button><button type="button" data-effect="shadow">Shadow</button><button type="button" data-effect="glow">Glow</button><button type="button" data-effect="none">Clean</button></div>
                 </div>
-                <p class="countdown-note">Every number stays visible. This label appears only while its video plays.</p>
+                <p class="countdown-note">Every number stays visible. A title appears with its video, then remains for the rest of the countdown. Size and position apply to the full list.</p>
               </div>
             </section>
 
@@ -355,6 +353,7 @@
       </form>
     </dialog>
 
+    <script src="/ranking-layout.js"></script>
     <script src="/app.js" defer></script>
   </body>
 </html>
