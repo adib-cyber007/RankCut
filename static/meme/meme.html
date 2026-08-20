@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Meme Editor · RankCut Studio</title>
+  <link rel="stylesheet" href="/platform.css">
+  <link rel="stylesheet" href="/meme/meme.css">
+</head>
+<body>
+  <div class="shell wide">
+    <header class="topbar">
+      <a class="brand" href="/"><span class="brand-mark">R</span><span>RankCut Studio</span></a>
+      <nav class="nav" aria-label="Workspaces"><a href="/">Dashboard</a><a href="/ranking">Ranking</a><a class="active" href="/meme">Meme editor</a></nav>
+    </header>
+    <main>
+      <div class="workspace-heading">
+        <div><span class="eyebrow">Punchline compositor</span><h1>Meme Editor</h1></div>
+        <div class="toolbar"><button class="btn secondary" id="saveButton">Save project</button><button class="btn" id="exportButton">Export image</button><button class="btn coral" id="animateButton">Impact GIF</button></div>
+      </div>
+      <section class="meme-grid">
+        <aside class="panel source-panel">
+          <div class="search-row"><input id="searchInput" aria-label="Search memes" placeholder="Search templates"><button class="btn" id="searchButton">Find</button></div>
+          <div class="tabs" role="tablist" aria-label="Meme sources"><button class="active" role="tab" aria-selected="true" aria-controls="resultGrid" data-source="templates">Templates</button><button role="tab" aria-selected="false" aria-controls="resultGrid" data-source="gifs">GIFs</button><button role="tab" aria-selected="false" aria-controls="resultGrid" data-source="trending">Trending</button></div>
+          <p class="integration-note" id="integrationNote" aria-live="polite">Checking search providers…</p>
+          <div class="url-import"><input id="imageUrlInput" type="url" placeholder="Paste a public image URL" aria-label="Public image URL"><button class="btn secondary" id="importUrlButton">Use URL</button></div>
+          <div class="upload-drop"><input type="file" id="imageUpload" accept="image/png,image/jpeg,image/webp,image/gif"><strong>Upload an image</strong><span>PNG, JPG, WebP, or GIF</span></div>
+          <div class="result-note" id="resultNote">Search the template library, or start from your own image.</div>
+          <div class="result-grid" id="resultGrid" role="tabpanel" aria-live="polite"></div>
+        </aside>
+        <section class="stage-column">
+          <div class="stage-toolbar">
+            <button class="tool active" data-tool="select">↖ Select</button><button class="tool" data-tool="text">T Text</button><button class="tool" data-tool="bubble">◯ Bubble</button><button class="tool" data-tool="sticker">☺ Sticker</button>
+            <span class="spacer"></span><label>Canvas <select id="aspectSelect"><option value="1:1">1:1</option><option value="9:16">9:16</option><option value="16:9">16:9</option></select></label>
+          </div>
+          <div class="canvas-bay"><canvas id="memeCanvas" width="1080" height="1080" aria-label="Meme canvas"></canvas><div class="canvas-empty" id="canvasEmpty"><strong>Drop in the setup.</strong><span>Choose a template or upload an image.</span></div></div>
+          <div class="status" id="status" aria-live="polite"></div>
+        </section>
+        <aside class="panel inspector">
+          <div class="quick-actions"><button class="btn" id="classicButton">Classic top + bottom</button><button class="btn secondary" id="duplicateButton">Duplicate</button><button class="btn secondary" id="deleteButton">Delete</button></div>
+          <div class="control-section">
+            <h3>Selected layer</h3>
+            <div class="field"><label for="layerText">Text / emoji</label><textarea id="layerText" rows="3" placeholder="Type the punchline"></textarea></div>
+            <div class="pair"><div class="field"><label>Font</label><select id="fontSelect"><option>Bangers</option><option>Impact</option><option>Arial Black</option><option>Georgia</option><option>Comic Sans MS</option><option>Trebuchet MS</option></select></div><div class="field"><label>Size</label><input id="fontSize" type="number" min="18" max="220" value="76"></div></div>
+            <div class="pair"><div class="field"><label>Fill</label><input id="fillColor" type="color" value="#ffffff"></div><div class="field"><label>Outline</label><input id="strokeWidth" type="range" min="0" max="18" value="8"></div></div>
+            <label class="check"><input id="shadowToggle" type="checkbox" checked> Drop shadow</label><label class="check"><input id="backgroundToggle" type="checkbox"> Caption background</label><label class="check"><input id="autoShrinkToggle" type="checkbox" checked> Auto-shrink to fit</label>
+          </div>
+          <div class="control-section">
+            <h3>Sticker shelf</h3>
+            <div class="sticker-shelf" aria-label="Built-in stickers"><button data-sticker-image="/meme/stickers/burst.svg" aria-label="Add comic burst sticker"><img src="/meme/stickers/burst.svg" alt=""></button><button data-sticker-image="/meme/stickers/arrow.svg" aria-label="Add arrow sticker"><img src="/meme/stickers/arrow.svg" alt=""></button><button data-sticker-image="/meme/stickers/crown.svg" aria-label="Add crown sticker"><img src="/meme/stickers/crown.svg" alt=""></button><button data-sticker="🔥" aria-label="Add fire emoji sticker">🔥</button><button data-sticker="😂" aria-label="Add laughing emoji sticker">😂</button><button data-sticker="✨" aria-label="Add sparkle emoji sticker">✨</button></div>
+          </div>
+          <div class="control-section">
+            <h3>Image treatment</h3>
+            <div class="field"><label>Filter</label><select id="filterSelect"><option value="none">Clean</option><option value="deep-fry">Deep fry</option><option value="mono">High-contrast mono</option><option value="vintage">Crunchy vintage</option></select></div>
+            <div class="field"><label>Distortion</label><select id="distortSelect"><option value="none">None</option><option value="stretch">Stretch</option><option value="squish">Squish</option></select></div>
+            <div class="field"><label>Panel layout</label><select id="layoutSelect"><option value="single">Single</option><option value="comparison">Comparison</option><option value="quad">2 × 2 collage</option></select></div>
+          </div>
+          <div class="control-section export-options"><h3>Export</h3><div class="pair"><div class="field"><label>Static</label><select id="formatSelect"><option value="png">PNG</option><option value="jpeg">JPEG</option></select></div><div class="field"><label>Animated</label><select id="animationFormat"><option value="gif">GIF</option><option value="mp4">MP4</option></select></div></div><button class="btn secondary" id="batchAspectButton">Export 1:1 + 9:16 + 16:9</button><div class="batch-links" id="batchLinks"></div><p>No watermark. Exports are saved locally under <code>data/meme/exports</code>.</p></div>
+        </aside>
+      </section>
+    </main>
+  </div>
+  <script src="/meme/meme.js"></script>
+</body>
+</html>

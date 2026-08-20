@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RankCut Studio · Workspaces</title>
+  <link rel="stylesheet" href="/platform.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="/"><span class="brand-mark">R</span><span>RankCut Studio</span></a>
+      <nav class="nav" aria-label="Workspaces">
+        <a class="active" href="/">Dashboard</a><a href="/ranking">Ranking</a><a href="/meme">Meme editor</a>
+      </nav>
+    </header>
+    <main>
+      <section class="hero">
+        <div class="hero-grid">
+          <div>
+            <div class="eyebrow">Local creator workstation</div>
+            <h1>Make the order. Make the moment.</h1>
+            <p class="lede">Two focused workspaces for ranked shorts and fast memes. Everything stays on this computer, and the existing RankCut editor remains available exactly where you left it.</p>
+          </div>
+          <div class="signal"><strong id="healthValue">Checking</strong><span id="healthText">Looking for local media tools…</span></div>
+        </div>
+      </section>
+      <section class="workspace-grid" aria-label="Choose a workspace">
+        <a class="workspace ranking" href="/ranking"><div class="icon">▤</div><div><h2>Ranking</h2><p>Your original RankCut short editor: entrances, ranks, captions, preview, and FFmpeg export.</p></div><div class="open">Open RankCut →</div></a>
+        <a class="workspace" href="/meme"><div class="icon">✦</div><div><h2>Meme editor</h2><p>Search a cached template library or upload an image, then compose caption boxes, stickers, effects, and aspect ratios.</p></div><div class="open">Open Meme editor →</div></a>
+      </section>
+      <p class="note">Workspace data is stored in <code>data/</code>. Media and exports are intentionally ignored by Git so the project remains easy to share with another PC.</p>
+    </main>
+  </div>
+  <script>
+    fetch('/api/health').then(r => r.json()).then(data => {
+      document.getElementById('healthValue').textContent = data.ok ? 'Ready' : 'Needs setup';
+      document.getElementById('healthText').textContent = data.ok ? `FFmpeg ${data.tools.ffmpeg ? 'ready' : 'missing'} · yt-dlp ${data.tools.ytdlp ? 'ready' : 'optional'}` : 'The local server needs attention.';
+    }).catch(() => { document.getElementById('healthValue').textContent = 'Offline'; document.getElementById('healthText').textContent = 'Start the local server to use the workspaces.'; });
+  </script>
+</body>
+</html>

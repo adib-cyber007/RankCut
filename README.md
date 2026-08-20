@@ -1,16 +1,26 @@
 # RankCut Studio
 
-RankCut Studio is a local-first vertical video editor for creating ranked TikTok, Reels, and YouTube Shorts compilations. Paste video links or upload local footage, arrange the ranking, add styled text, trim each clip, and render one downloadable MP4.
+RankCut Studio is a local-first social-media production suite with two workspaces: the original Ranking editor and a Canvas-based Meme editor. It remains dependency-light, account-free, and bound to this computer.
 
 ## Start the app
+
+### Windows
 
 1. Double-click **Start RankCut.bat**.
 2. On a fresh clone, the launcher runs the one-time `setup.ps1` repair step and downloads portable Node.js, FFmpeg, FFprobe, and yt-dlp from their official release sources. Existing tools are reused.
 3. RankCut opens at `http://127.0.0.1:4174` in your default browser.
 
-No install or account is required. The server only listens on your own computer (`127.0.0.1`). Project data, source videos, and exports remain inside this folder.
+### macOS (Apple Silicon or Intel)
 
-## Share to another PC
+1. Clone or download this repository. No source-file edits are needed.
+2. In Terminal, run `chmod +x setup.sh "Start RankCut.command"` once if the executable permission was removed by a ZIP download.
+3. Double-click **Start RankCut.command**, or run `./Start\ RankCut.command` in Terminal.
+
+The Mac launcher reuses an installed Node.js 18+ when available, otherwise downloads a local Node.js 22 runtime. It downloads the official universal macOS yt-dlp executable and links FFmpeg from the Mac. If FFmpeg is missing, `setup.sh` installs it with an existing Homebrew installation; if Homebrew is not installed, it provides the official installation link instead of changing system configuration silently.
+
+No RankCut account or cloud service is required. The server only listens on your own computer (`127.0.0.1`). Project data, source videos, and exports remain inside this folder.
+
+## Share to another PC or Mac
 
 The source package is self-contained and can be shared through this GitHub repository:
 
@@ -20,11 +30,27 @@ cd RankCut
 .\Start RankCut.bat
 ```
 
+On macOS:
+
+```bash
+git clone https://github.com/adib-cyber007/RankCut.git
+cd RankCut
+./Start\ RankCut.command
+```
+
 The first launch downloads the ignored media-tool executables into `tools/`. GitHub does not store those large binaries, local uploads, exports, or `data/project.json`.
 
 To move an editable project between PCs, copy `data/project.json` and the matching files in `data/uploads/` together. To share only the editor, clone the repository and start it with an empty local project.
 
-## Editor workflow
+## Workspaces
+
+- Dashboard: `http://127.0.0.1:4174/`
+- Original Ranking editor: `http://127.0.0.1:4174/ranking`
+- Meme editor: `http://127.0.0.1:4174/meme`
+
+The original Ranking editor files (`static/index.html`, `static/app.js`, `static/ranking-layout.js`, and `static/styles.css`) are unchanged.
+
+## Ranking workflow
 
 - Paste one TikTok or YouTube URL per line, then choose **Import**.
 - You can also choose **Upload** for MP4, MOV, M4V, WebM, or MKV files.
@@ -38,9 +64,12 @@ To move an editable project between PCs, copy `data/project.json` and the matchi
 
 ## Where files are stored
 
-- Project state: `data/project.json`
-- Imported/uploaded videos: `data/uploads/`
-- Finished MP4 files: `data/exports/`
+- Ranking: `data/project.json`, `data/uploads/`, `data/exports/`
+- Meme editor: `data/meme/project.json`, `data/meme/uploads/`, `data/meme/templates-cache/`, `data/meme/exports/`
+
+## Optional GIF search
+
+Copy `config.example.json` to `config.json`, add the key for each enabled provider, and restart RankCut. The local key file is ignored by Git. The supplied configuration enables Giphy; Imgflip, Tenor, and Reddit remain disabled unless explicitly enabled.
 
 ## Notes
 
@@ -51,9 +80,9 @@ To move an editable project between PCs, copy `data/project.json` and the matchi
 
 ## Manual start
 
-From PowerShell in this folder:
+From PowerShell or Terminal in this folder:
 
-```powershell
+```text
 node server.js
 ```
 

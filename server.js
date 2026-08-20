@@ -1,7 +1,7 @@
 /*
  * RankCut Studio
  * Dependency-free local HTTP server. Video downloading is delegated to yt-dlp
- * and rendering to FFmpeg, both stored in ./tools by setup.ps1.
+ * and rendering to FFmpeg, both stored in ./tools by the platform setup script.
  */
 
 'use strict';
@@ -12,25 +12,38 @@ const fsp = fs.promises;
 const path = require('path');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
+const dns = require('dns').promises;
+const net = require('net');
 const RankingLayout = require('./static/ranking-layout.js');
+const { requestPinnedHttps } = require('./lib/pinned-https.js');
 
 const ROOT = __dirname;
 const PROJECT_VERSION = 4;
 const STATIC_DIR = path.join(ROOT, 'static');
-const DATA_DIR = path.join(ROOT, 'data');
+const DATA_DIR = path.resolve(process.env.RANKCUT_DATA_DIR || path.join(ROOT, 'data'));
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const EXPORT_DIR = path.join(DATA_DIR, 'exports');
 const JOB_DIR = path.join(DATA_DIR, 'jobs');
 const PROJECT_FILE = path.join(DATA_DIR, 'project.json');
+const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+const ROOT_CONFIG_FILE = path.join(ROOT, 'config.json');
+const ENV_FILE = path.join(ROOT, '.env');
+const MEME_DIR = path.join(DATA_DIR, 'meme');
+const MEME_UPLOAD_DIR = path.join(MEME_DIR, 'uploads');
+const MEME_TEMPLATE_DIR = path.join(MEME_DIR, 'templates-cache');
+const MEME_EXPORT_DIR = path.join(MEME_DIR, 'exports');
+const MEME_PROJECT_FILE = path.join(MEME_DIR, 'project.json');
 const TOOL_DIR = path.join(ROOT, 'tools');
 const YTDLP = path.join(TOOL_DIR, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
 const FFMPEG = path.join(TOOL_DIR, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
 const FFPROBE = path.join(TOOL_DIR, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+const SETUP_HINT = process.platform === 'win32' ? 'Run setup.ps1 first.' : 'Run ./setup.sh first.';
 const HOST = process.env.RANKCUT_HOST || '127.0.0.1';
 const PORT = Number(process.env.RANKCUT_PORT || 4174);
 const MAX_JSON = 5 * 1024 * 1024;
 const MAX_UPLOAD = 8 * 1024 * 1024 * 1024;
 const jobs = new Map();
+let localConfig = {};
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -38,9 +51,11 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.ttf': 'font/ttf',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
   '.webp': 'image/webp',
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
@@ -48,6 +63,10 @@ const MIME = {
   '.m4v': 'video/x-m4v',
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.flac': 'audio/flac',
+  '.ogg': 'audio/ogg',
 };
 
 async function ensureDirs() {
@@ -56,6 +75,9 @@ async function ensureDirs() {
     fsp.mkdir(UPLOAD_DIR, { recursive: true }),
     fsp.mkdir(EXPORT_DIR, { recursive: true }),
     fsp.mkdir(JOB_DIR, { recursive: true }),
+    fsp.mkdir(MEME_UPLOAD_DIR, { recursive: true }),
+    fsp.mkdir(MEME_TEMPLATE_DIR, { recursive: true }),
+    fsp.mkdir(MEME_EXPORT_DIR, { recursive: true }),
     fsp.mkdir(TOOL_DIR, { recursive: true }),
   ]);
 }
@@ -281,8 +303,8 @@ async function removeImportArtifacts(id) {
 }
 
 async function importFromUrl(sourceUrl) {
-  if (!fs.existsSync(YTDLP)) throw new Error('yt-dlp is missing. Run setup.ps1 first.');
-  if (!fs.existsSync(FFMPEG)) throw new Error('FFmpeg is missing. Run setup.ps1 first.');
+  if (!fs.existsSync(YTDLP)) throw new Error(`yt-dlp is missing. ${SETUP_HINT}`);
+  if (!fs.existsSync(FFMPEG)) throw new Error(`FFmpeg is missing. ${SETUP_HINT}`);
   const url = validateSourceUrl(sourceUrl);
   const platform = sourcePlatform(url);
   const id = makeId('clip_');
@@ -569,7 +591,7 @@ async function renderProject(jobId, project) {
   const job = jobs.get(jobId);
   const clips = Array.isArray(project?.clips) ? project.clips : [];
   if (!clips.length) throw new Error('Add at least one video before exporting.');
-  if (!fs.existsSync(FFMPEG) || !fs.existsSync(FFPROBE)) throw new Error('FFmpeg is missing. Run setup.ps1 first.');
+  if (!fs.existsSync(FFMPEG) || !fs.existsSync(FFPROBE)) throw new Error(`FFmpeg is missing. ${SETUP_HINT}`);
   const tempDir = path.join(JOB_DIR, jobId);
   await fsp.mkdir(tempDir, { recursive: true });
   const segments = [];
@@ -640,6 +662,302 @@ async function listExports() {
     return { name, url: toMediaUrl(full), size: stat.size, createdAt: stat.mtime.toISOString() };
   }));
   return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20);
+}
+
+async function readOptionalJson(filePath) {
+  try {
+    return JSON.parse(await fsp.readFile(filePath, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function loadLocalConfig() {
+  const fromRoot = await readOptionalJson(ROOT_CONFIG_FILE) || {};
+  const fromData = await readOptionalJson(CONFIG_FILE) || {};
+  const fromEnvFile = {};
+  try {
+    const body = await fsp.readFile(ENV_FILE, 'utf8');
+    for (const line of body.split(/\r?\n/)) {
+      const match = /^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+      if (!match) continue;
+      fromEnvFile[match[1]] = match[2].replace(/^(['"])(.*)\1$/, '$2');
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  localConfig = { ...fromData, ...fromRoot, ...fromEnvFile };
+  return localConfig;
+}
+
+function configValue(...names) {
+  for (const name of names) {
+    const camelName = name.toLowerCase().replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+    const value = process.env[name] || localConfig[name] || localConfig[camelName];
+    if (value) return String(value);
+  }
+  return '';
+}
+
+function integrationFlag(name, fallback) {
+  const flagName = `RANKCUT_${name.toUpperCase()}_ENABLED`;
+  const environment = process.env[flagName] ?? localConfig[flagName];
+  if (environment != null) return /^(1|true|yes|on)$/i.test(environment);
+  const direct = localConfig.integrations?.[name];
+  if (typeof direct === 'boolean') return direct;
+  return fallback;
+}
+
+function activeGifProvider() {
+  const giphyKey = configValue('GIPHY_API_KEY');
+  const tenorKey = configValue('TENOR_API_KEY');
+  if (integrationFlag('giphy', true) && giphyKey) return { name:'Giphy', key:giphyKey };
+  if (integrationFlag('tenor', false) && tenorKey) return { name:'Tenor', key:tenorKey };
+  return null;
+}
+
+function memeIntegrationStatus() {
+  const imgflipEnabled = integrationFlag('imgflip', false);
+  const redditEnabled = integrationFlag('reddit', false);
+  const giphyEnabled = integrationFlag('giphy', true);
+  const tenorEnabled = integrationFlag('tenor', false);
+  const gifProvider = activeGifProvider();
+  return {
+    templates: { enabled:imgflipEnabled, provider:'Imgflip', message:imgflipEnabled ? '' : 'Imgflip is disabled in local config.' },
+    gifs: { enabled:Boolean(gifProvider), provider:gifProvider?.name || (giphyEnabled ? 'Giphy' : tenorEnabled ? 'Tenor' : 'GIF search'), message:gifProvider ? '' : 'Add a key for an enabled GIF provider to config.json, then restart RankCut.' },
+    trending: { enabled:redditEnabled, provider:'Reddit', message:redditEnabled ? '' : 'Reddit is disabled in local config.' },
+  };
+}
+
+function dataUrlToBuffer(value) {
+  const match = /^data:(image\/(?:png|jpeg|jpg|webp));base64,([a-z0-9+/=\s]+)$/i.exec(String(value || ''));
+  if (!match) throw new Error('Use a PNG, JPEG, or WebP image export.');
+  const body = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
+  if (!body.length || body.length > 60 * 1024 * 1024) throw new Error('The image export is empty or larger than 60 MB.');
+  return { buffer: body, mime: match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase() };
+}
+
+async function saveBinaryUpload(req, directory, originalName, allowed, label) {
+  const clean = safeFilename(originalName || 'upload');
+  const ext = path.extname(clean).toLowerCase();
+  if (!allowed.has(ext)) throw new Error(`Choose a supported ${label} file.`);
+  const id = makeId('asset_');
+  const target = path.join(directory, `${id}-${clean}`);
+  const stream = fs.createWriteStream(target, { flags: 'wx' });
+  let size = 0;
+  try {
+    for await (const chunk of req) {
+      size += chunk.length;
+      if (size > MAX_UPLOAD) throw new Error('The upload is larger than the 8 GB local limit.');
+      if (!stream.write(chunk)) await new Promise((resolve) => stream.once('drain', resolve));
+    }
+    await new Promise((resolve, reject) => stream.end((error) => error ? reject(error) : resolve()));
+  } catch (error) {
+    stream.destroy();
+    await fsp.unlink(target).catch(() => {});
+    throw error;
+  }
+  if (!size) {
+    await fsp.unlink(target).catch(() => {});
+    throw new Error('The uploaded file is empty.');
+  }
+  return {
+    id,
+    name: path.basename(clean, ext).replace(/[-_]+/g, ' '),
+    file: path.relative(DATA_DIR, target).split(path.sep).join('/'),
+    url: toMediaUrl(target),
+    size,
+  };
+}
+
+async function searchMemeSources(source, query) {
+  const normalized = ['templates', 'gifs', 'trending'].includes(source) ? source : 'templates';
+  const integration = memeIntegrationStatus()[normalized];
+  if (!integration?.enabled) return { source:normalized, configured:false, items:[], message:integration?.message || 'This integration is disabled.' };
+  if (normalized === 'templates') {
+    const cachePath = path.join(MEME_TEMPLATE_DIR, 'imgflip.json');
+    let payload = await readOptionalJson(cachePath);
+    const stale = !payload || Date.now() - Number(payload.cachedAt || 0) > 6 * 60 * 60 * 1000;
+    if (stale) {
+      try {
+        const response = await fetchWithTimeout('https://api.imgflip.com/get_memes');
+        if (!response.ok) throw new Error(`Imgflip returned ${response.status}`);
+        const data = await response.json();
+        payload = { cachedAt: Date.now(), memes: Array.isArray(data.memes) ? data.memes : [] };
+        await fsp.writeFile(cachePath, JSON.stringify(payload, null, 2), 'utf8');
+      } catch (error) {
+        if (!payload) return { source: normalized, configured: false, error: 'Imgflip templates are unavailable offline.' };
+      }
+    }
+    const term = String(query || '').trim().toLowerCase();
+    const memes = (payload?.memes || []).filter((item) => !term || `${item.name} ${item.tags || ''}`.toLowerCase().includes(term)).slice(0, 60);
+    return { source: normalized, configured: true, items: memes.map((item) => ({ id: item.id, name: item.name, url: item.url, width: item.width, height: item.height })) };
+  }
+  if (normalized === 'trending') {
+    const cachePath = path.join(MEME_TEMPLATE_DIR, 'reddit.json');
+    let payload = await readOptionalJson(cachePath);
+    const stale = !payload || Date.now() - Number(payload.cachedAt || 0) > 10 * 60 * 1000;
+    if (stale) {
+      try {
+        const response = await fetchWithTimeout('https://www.reddit.com/r/memes/hot.json?limit=60&raw_json=1', { headers: { 'User-Agent': 'RankCut-Studio/2.0 local-app' } });
+        if (!response.ok) throw new Error(`Reddit returned ${response.status}`);
+        const data = await response.json();
+        const posts = (data?.data?.children || []).map((entry) => entry.data || {}).filter((post) => post.url_overridden_by_dest && /\.(?:png|jpe?g|webp|gif)(?:\?|$)/i.test(post.url_overridden_by_dest));
+        payload = { cachedAt: Date.now(), posts };
+        await fsp.writeFile(cachePath, JSON.stringify(payload, null, 2), 'utf8');
+      } catch (error) {
+        if (!payload) return { source: normalized, configured: false, items: [], error: 'Trending memes are unavailable offline.' };
+      }
+    }
+    const term = String(query || '').trim().toLowerCase();
+    const items = (payload?.posts || []).filter((post) => !term || String(post.title || '').toLowerCase().includes(term)).slice(0, 40).map((post) => ({ id: post.id, name: post.title || 'Trending meme', url: post.url_overridden_by_dest, width: post.preview?.images?.[0]?.source?.width, height: post.preview?.images?.[0]?.source?.height }));
+    return { source: normalized, configured: true, items };
+  }
+  const provider = activeGifProvider();
+  if (!provider) return { source: normalized, configured: false, items: [], message: 'Add a key for an enabled GIF provider to config.json to enable GIF search.' };
+  const cacheKey = crypto.createHash('sha1').update(`${provider.name.toLowerCase()}:${String(query || 'trending').toLowerCase()}`).digest('hex').slice(0, 16);
+  const cachePath = path.join(MEME_TEMPLATE_DIR, `gifs-${cacheKey}.json`);
+  const cached = await readOptionalJson(cachePath);
+  if (cached && Date.now() - Number(cached.cachedAt || 0) < 10 * 60 * 1000) return { source: normalized, configured: true, items: cached.items || [], cached: true };
+  try {
+    const endpoint = provider.name === 'Giphy'
+      ? `https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(provider.key)}&q=${encodeURIComponent(query || 'trending')}&limit=30`
+      : `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query || 'trending')}&key=${encodeURIComponent(provider.key)}&limit=30&media_filter=gif`;
+    const response = await fetchWithTimeout(endpoint);
+    if (!response.ok) throw new Error(`Provider returned ${response.status}`);
+    const data = await response.json();
+    const items = provider.name === 'Giphy'
+      ? (data.data || []).map((item) => ({ id: item.id, name: item.title || 'GIF', url: item.images?.original?.url || item.images?.downsized?.url }))
+      : (data.results || []).map((item) => ({ id: item.id, name: item.content_description || 'GIF', url: item.media_formats?.gif?.url || item.media_formats?.mp4?.url }));
+    const filtered = items.filter((item) => item.url);
+    await fsp.writeFile(cachePath, JSON.stringify({ cachedAt:Date.now(), items:filtered }, null, 2), 'utf8');
+    return { source: normalized, configured: true, items: filtered };
+  } catch (error) {
+    return { source: normalized, configured: true, items: [], error: `${normalized} search is unavailable right now.` };
+  }
+}
+
+function privateNetworkAddress(address) {
+  if (net.isIPv4(address)) {
+    const parts = address.split('.').map(Number);
+    return parts[0] === 10 || parts[0] === 127 || parts[0] === 0 ||
+      (parts[0] === 169 && parts[1] === 254) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+      (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) ||
+      (parts[0] === 192 && (parts[1] === 168 || parts[1] === 0 || parts[1] === 2)) ||
+      (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19 || (parts[1] === 51 && parts[2] === 100))) ||
+      (parts[0] === 203 && parts[1] === 0 && parts[2] === 113) || parts[0] >= 224;
+  }
+  const lower = String(address || '').toLowerCase();
+  if (lower.startsWith('::ffff:')) return true;
+  return lower === '::1' || lower === '::' || /^fe[89ab]/.test(lower) || /^f[cd]/.test(lower) || lower.startsWith('ff') || lower.startsWith('2001:db8:');
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  return fetch(url, { ...options, signal:AbortSignal.timeout(timeoutMs) });
+}
+
+async function validatePublicImageUrl(parsed) {
+  if (parsed.protocol !== 'https:') throw new Error('Only secure image URLs can be imported.');
+  if (parsed.username || parsed.password) throw new Error('Image URLs cannot include credentials.');
+  if (parsed.hostname === 'localhost' || parsed.hostname.endsWith('.local')) throw new Error('Local network image URLs are not supported.');
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
+  if (net.isIP(hostname)) {
+    if (privateNetworkAddress(hostname)) throw new Error('Local network image URLs are not supported.');
+    return { address:hostname, family:net.isIP(hostname) };
+  }
+  let timer;
+  const addresses = await Promise.race([
+    dns.lookup(hostname, { all:true }),
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Image URL lookup timed out.')), 5000); }),
+  ]).finally(() => clearTimeout(timer));
+  if (!addresses.length || addresses.some((entry) => privateNetworkAddress(entry.address))) throw new Error('The image URL resolves to a private network address.');
+  return addresses.find((entry) => entry.family === 4) || addresses[0];
+}
+
+async function fetchPublicImage(startUrl) {
+  let current = new URL(startUrl);
+  for (let redirectCount = 0; redirectCount <= 5; redirectCount += 1) {
+    const address = await validatePublicImageUrl(current);
+    const response = await requestPinnedHttps(current, address, { 'User-Agent':'RankCut-Studio/2.0 local-app' }, 15000);
+    if (response.status < 300 || response.status >= 400) return response;
+    const location = response.headers.get('location');
+    response.cancel();
+    if (!location) throw new Error('The image provider returned an invalid redirect.');
+    current = new URL(location, current);
+  }
+  throw new Error('The image URL redirected too many times.');
+}
+
+async function readResponseBuffer(response, maximumBytes) {
+  const declaredSize = Number(response.headers.get('content-length') || 0);
+  if (declaredSize > maximumBytes) {
+    response.cancel?.();
+    throw new Error('The imported image is larger than 60 MB.');
+  }
+  const chunks = [];
+  let size = 0;
+  if (!response.body) return Buffer.alloc(0);
+  for await (const chunk of response.body) {
+    const buffer = Buffer.from(chunk);
+    size += buffer.length;
+    if (size > maximumBytes) {
+      response.cancel?.();
+      throw new Error('The imported image is larger than 60 MB.');
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks, size);
+}
+
+async function importMemeAsset(sourceUrl, manual = false) {
+  let parsed;
+  try { parsed = new URL(String(sourceUrl || '')); } catch { throw new Error('Choose a valid image URL.'); }
+  if (parsed.protocol !== 'https:') throw new Error('Only secure image URLs can be imported.');
+  const allowedHosts = ['imgflip.com', 'giphy.com', 'giphyusercontent.com', 'tenor.com', 'googleusercontent.com', 'reddit.com', 'redd.it', 'redditmedia.com'];
+  const hostAllowed = allowedHosts.some((host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`));
+  if (!manual && !hostAllowed) throw new Error('This image host is not supported by the meme search importer.');
+  const response = await fetchPublicImage(parsed);
+  if (!response.ok) {
+    response.cancel?.();
+    throw new Error(`The image provider returned ${response.status}.`);
+  }
+  const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+  if (!/^image\/(?:png|jpe?g|webp|gif)/i.test(contentType)) {
+    response.cancel?.();
+    throw new Error('The URL did not return a supported image.');
+  }
+  const ext = contentType.includes('gif') ? '.gif' : contentType.includes('webp') ? '.webp' : contentType.includes('png') ? '.png' : '.jpg';
+  const body = await readResponseBuffer(response, 60 * 1024 * 1024);
+  if (!body.length) throw new Error('The imported image is empty.');
+  const name = `${makeId('meme_')}${ext}`;
+  const target = path.join(MEME_UPLOAD_DIR, name);
+  await fsp.writeFile(target, body);
+  return { id: path.basename(name, ext), name, file: path.relative(DATA_DIR, target).split(path.sep).join('/'), url: toMediaUrl(target), size: body.length };
+}
+
+async function exportAnimatedMeme(body) {
+  if (!fs.existsSync(FFMPEG)) throw new Error(`FFmpeg is missing. ${SETUP_HINT}`);
+  const frames = Array.isArray(body.frames) ? body.frames.slice(0, 36) : [];
+  if (frames.length < 2) throw new Error('Animated export needs at least two frames.');
+  const id = makeId('meme_anim_');
+  const tempDir = path.join(JOB_DIR, id);
+  await fsp.mkdir(tempDir, { recursive: true });
+  for (let index = 0; index < frames.length; index += 1) {
+    const image = dataUrlToBuffer(frames[index]);
+    await fsp.writeFile(path.join(tempDir, `frame-${String(index).padStart(3, '0')}.jpg`), image.buffer);
+  }
+  const fps = safeNumber(body.fps, 12, 4, 24);
+  const format = body.format === 'gif' ? 'gif' : 'mp4';
+  const outputName = `meme-${id}.${format}`;
+  const output = path.join(MEME_EXPORT_DIR, outputName);
+  if (format === 'gif') {
+    await run(FFMPEG, ['-y', '-hide_banner', '-framerate', String(fps), '-i', path.join(tempDir, 'frame-%03d.jpg'), '-vf', 'fps=12,scale=720:-2:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse', '-loop', '0', output]);
+  } else {
+    await run(FFMPEG, ['-y', '-hide_banner', '-framerate', String(fps), '-i', path.join(tempDir, 'frame-%03d.jpg'), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', output]);
+  }
+  const stat = await fsp.stat(output);
+  return { name: outputName, url: toMediaUrl(output), size: stat.size };
 }
 
 async function route(req, res) {
@@ -727,6 +1045,59 @@ async function route(req, res) {
     return;
   }
 
+  if (pathname === '/api/meme/project' && req.method === 'GET') {
+    sendJson(res, 200, { ok: true, project: await readOptionalJson(MEME_PROJECT_FILE) });
+    return;
+  }
+
+  if (pathname === '/api/meme/project' && req.method === 'POST') {
+    const body = await readJson(req);
+    await fsp.writeFile(MEME_PROJECT_FILE, JSON.stringify(body.project || body, null, 2), 'utf8');
+    sendJson(res, 200, { ok: true, savedAt: new Date().toISOString() });
+    return;
+  }
+
+  if (pathname === '/api/meme/integrations' && req.method === 'GET') {
+    sendJson(res, 200, { ok:true, integrations:memeIntegrationStatus() });
+    return;
+  }
+
+  if (pathname === '/api/meme/search' && req.method === 'GET') {
+    const result = await searchMemeSources(requestUrl.searchParams.get('source'), requestUrl.searchParams.get('q'));
+    sendJson(res, 200, { ok: true, ...result });
+    return;
+  }
+
+  if (pathname === '/api/meme/upload' && req.method === 'PUT') {
+    const asset = await saveBinaryUpload(req, MEME_UPLOAD_DIR, requestUrl.searchParams.get('filename') || 'image.png', new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']), 'image');
+    sendJson(res, 200, { ok: true, asset });
+    return;
+  }
+
+  if (pathname === '/api/meme/import' && req.method === 'POST') {
+    const body = await readJson(req);
+    sendJson(res, 200, { ok: true, asset: await importMemeAsset(body.url, body.manual === true) });
+    return;
+  }
+
+  if (pathname === '/api/meme/export' && req.method === 'POST') {
+    const body = await readJson(req);
+    const image = dataUrlToBuffer(body.dataUrl);
+    const extension = image.mime === 'image/png' ? '.png' : image.mime === 'image/webp' ? '.webp' : '.jpg';
+    const name = safeFilename(body.filename || `meme-${new Date().toISOString()}`);
+    const outputName = `${path.basename(name, path.extname(name)) || 'meme'}-${Date.now()}${extension}`;
+    const output = path.join(MEME_EXPORT_DIR, outputName);
+    await fsp.writeFile(output, image.buffer);
+    sendJson(res, 200, { ok: true, export: { name: outputName, url: toMediaUrl(output), size: image.buffer.length } });
+    return;
+  }
+
+  if (pathname === '/api/meme/export-animated' && req.method === 'POST') {
+    const body = await readJson(req);
+    sendJson(res, 200, { ok: true, export: await exportAnimatedMeme(body) });
+    return;
+  }
+
   if (pathname.startsWith('/media/') && (req.method === 'GET' || req.method === 'HEAD')) {
     const target = resolveInside(DATA_DIR, pathname.slice('/media/'.length));
     if (!target) sendError(res, 403, 'Invalid media path.');
@@ -735,7 +1106,10 @@ async function route(req, res) {
   }
 
   if (req.method === 'GET' || req.method === 'HEAD') {
-    const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\//, '');
+    const relative = pathname === '/' ? 'dashboard.html'
+      : pathname === '/ranking' || pathname === '/ranking/' ? 'index.html'
+        : pathname === '/meme' || pathname === '/meme/' ? 'meme/meme.html'
+          : pathname.replace(/^\//, '');
     const target = resolveInside(STATIC_DIR, relative);
     if (!target) sendError(res, 403, 'Invalid path.');
     else await serveFile(req, res, target);
@@ -746,6 +1120,7 @@ async function route(req, res) {
 }
 
 async function main() {
+  await loadLocalConfig();
   await ensureDirs();
   const server = http.createServer((req, res) => {
     route(req, res).catch((error) => {

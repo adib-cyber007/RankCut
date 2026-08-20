@@ -1,0 +1,10 @@
+{
+  "GIPHY_API_KEY": "",
+  "TENOR_API_KEY": "",
+  "integrations": {
+    "imgflip": false,
+    "giphy": true,
+    "tenor": false,
+    "reddit": false
+  }
+}
